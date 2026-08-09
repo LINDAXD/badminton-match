@@ -785,15 +785,19 @@ function App() {
 
   // 통산 전적(승/패/경기수) — matchhistory(영구 저장)에서 계산 + 관리자 수동 보정값 반영
   function lifetimeStatsFor(id) {
-    let games = 0, wins = 0, losses = 0;
+    let games = 0, wins = 0, losses = 0, pointsFor = 0, pointsAgainst = 0;
     matchhistory.forEach((m) => {
       const inA = (m.teamA || []).some((p) => p.id === id);
       const inB = (m.teamB || []).some((p) => p.id === id);
       if (!inA && !inB) return;
+      const sA = Number(m.scoreA), sB = Number(m.scoreB);
+      if (isNaN(sA) || isNaN(sB)) return;
       games++;
-      const aWin = Number(m.scoreA) > Number(m.scoreB);
+      const aWin = sA > sB;
       const won = (inA && aWin) || (inB && !aWin);
       if (won) wins++; else losses++;
+      pointsFor += inA ? sA : sB;
+      pointsAgainst += inA ? sB : sA;
     });
     const adj = statsAdjust[id];
     if (adj) {
@@ -801,7 +805,15 @@ function App() {
       losses += adj.lossesAdj || 0;
       games += (adj.winsAdj || 0) + (adj.lossesAdj || 0);
     }
-    return { games, wins: Math.max(0, wins), losses: Math.max(0, losses) };
+    return { games, wins: Math.max(0, wins), losses: Math.max(0, losses), pointsFor, pointsAgainst };
+  }
+
+  // 내 최근 경기들 (점수·점수차까지) — "내 기록" 카드에서 써요
+  function myRecentMatches(id, n) {
+    return matchhistory
+      .filter((m) => (m.teamA || []).some((p) => p.id === id) || (m.teamB || []).some((p) => p.id === id))
+      .filter((m) => m.scoreA !== "" && m.scoreB !== "" && !isNaN(Number(m.scoreA)) && !isNaN(Number(m.scoreB)))
+      .slice(0, n);
   }
 
   const MIN_GAMES_FOR_TIER = 3;
@@ -1256,10 +1268,9 @@ function App() {
         if (pool.length < 4) {
           return { ok: false, reason: "notEnough" };
         }
-        // 진짜 무작위로 4명을 뽑아요 (오래 기다린 순서 안 따짐) — "랜덤 매칭"이니까요.
-        // 팀을 나눌 때만 최근 파트너/상대 겹침을 피하는 쪽으로 골라요 — 완전 무작위로 나누면
-        // 사람이 적을 때 자꾸 같은 조합이 반복될 수 있어서요.
-        const four = shuffleArray(pool).slice(0, 4);
+        // 오래 기다린 사람 우선으로 4명을 뽑아요 (판수가 골고루 돌아가게) — waitingPlayers가 이미 대기 시작 순서로 정렬돼 있어요.
+        // 팀을 나눌 때는 최근 파트너/상대 겹침을 피하는 쪽으로 똑똑하게 골라요.
+        const four = pool.slice(0, 4);
         const { a, b } = splitScore(four, matchCtx);
         const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
         const next = { ...current, [courtNum]: match };
@@ -1319,7 +1330,7 @@ function App() {
         if (pool.length < 4) {
           return { ok: false, reason: "notEnough" };
         }
-        const four = shuffleArray(pool).slice(0, 4);
+        const four = pool.slice(0, 4);
         const { a, b } = splitScore(four, matchCtx);
         const queued = { teamA: a, teamB: b };
         const nextData = { ...current, [courtNum]: { ...existing, next: queued } };
@@ -2336,6 +2347,57 @@ function App() {
 
       {tab === "record" && (
         <section className="px-5 mt-5 space-y-5">
+          {myId && (() => {
+            const s = lifetimeStatsFor(myId);
+            const rate = s.games > 0 ? Math.round((s.wins / s.games) * 100) : 0;
+            const avgDiff = s.games > 0 ? ((s.pointsFor - s.pointsAgainst) / s.games).toFixed(1) : "0.0";
+            const recent = myRecentMatches(myId, 10);
+            return (
+              <div className="rounded-2xl p-4 text-white" style={{ background: "linear-gradient(135deg, #52B858 0%, #3C9A45 100%)" }}>
+                <p className="text-[11px] uppercase tracking-widest text-white/80 mb-2">🙋 내 기록</p>
+                <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                  <div>
+                    <p className="headfont text-2xl">{rate}<span className="text-xs font-normal">%</span></p>
+                    <p className="text-[10px] text-white/70">승률</p>
+                  </div>
+                  <div>
+                    <p className="headfont text-2xl">{s.wins}<span className="text-xs font-normal">승</span> {s.losses}<span className="text-xs font-normal">패</span></p>
+                    <p className="text-[10px] text-white/70">전적 (총 {s.games}경기)</p>
+                  </div>
+                  <div>
+                    <p className="headfont text-2xl">{avgDiff > 0 ? "+" : ""}{avgDiff}</p>
+                    <p className="text-[10px] text-white/70">평균 득실차</p>
+                  </div>
+                </div>
+                {recent.length > 0 && (
+                  <div className="pt-3 border-t border-white/20 space-y-1.5">
+                    <p className="text-[11px] text-white/80 mb-1">최근 경기</p>
+                    {recent.map((m) => {
+                      const inA = (m.teamA || []).some((p) => p.id === myId);
+                      const myScore = inA ? Number(m.scoreA) : Number(m.scoreB);
+                      const oppScore = inA ? Number(m.scoreB) : Number(m.scoreA);
+                      const won = myScore > oppScore;
+                      const diff = myScore - oppScore;
+                      const teammate = (inA ? m.teamA : m.teamB).find((p) => p.id !== myId);
+                      const opponents = (inA ? m.teamB : m.teamA).map((p) => p.name).join("·");
+                      return (
+                        <div key={m.id} className="bg-white/10 rounded-lg px-2.5 py-2">
+                          <p className="text-xs mb-1">
+                            {teammate ? <><b>{teammate.name}</b>님과 </> : ""}
+                            <span className="text-white/70">vs</span> <b>{opponents}</b>
+                          </p>
+                          <p className="text-xs font-semibold">
+                            {won ? "🟢 승리" : "🔴 패배"} · {myScore}:{oppScore} ({diff > 0 ? "+" : ""}{diff}점차)
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           <div>
             <p className="text-sm font-semibold mb-2">🏆 통산 순위</p>
             <p className="text-[11px] text-stone-400 mb-2">기록은 저장돼서 새로고침해도 사라지지 않아요.</p>
