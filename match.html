@@ -38,25 +38,35 @@ function bump(map, key) {
 
 // score a single 4-person court split
 // ctx: { hist, skillOf, mode, todayPairCount, isFirstTimer, isKindOrStrong }
-function splitScore(four, ctx) {
+function splitScore(four, ctx, excludeKey) {
   const { hist, skillOf, mode = "balance", todayPairCount, isFirstTimer, isKindOrStrong } = ctx || {};
 
-  // 🎲 랜덤 모드: 아무 계산 없이 완전 무작위로 팀을 갈라요
+  // 🎲 랜덤 모드: 아무 계산 없이 완전 무작위로 팀을 갈라요 (제외할 조합이 있으면 그것만 빼고 골라요)
   if (mode === "random") {
-    const splits = [
+    let splits = [
       [[four[0], four[1]], [four[2], four[3]]],
       [[four[0], four[2]], [four[1], four[3]]],
       [[four[0], four[3]], [four[1], four[2]]],
     ];
+    if (excludeKey) {
+      const filtered = splits.filter(([a]) => `${a[0].id}|${a[1].id}` !== excludeKey && `${a[1].id}|${a[0].id}` !== excludeKey);
+      if (filtered.length) splits = filtered;
+    }
     const [a, b] = splits[Math.floor(Math.random() * splits.length)];
     return { s: 0, a, b };
   }
 
-  const splits = [
+  let splits = [
     [[four[0], four[1]], [four[2], four[3]]],
     [[four[0], four[2]], [four[1], four[3]]],
     [[four[0], four[3]], [four[1], four[2]]],
   ];
+  // 다시 섞기처럼 "지금이랑 다른 조합"을 원할 때는, 후보에서 지금 조합을 아예 빼버려요
+  // (그래야 동점이어도 예전 조합이 그대로 다시 뽑히는 일이 없어요)
+  if (excludeKey) {
+    const filtered = splits.filter(([a]) => `${a[0].id}|${a[1].id}` !== excludeKey && `${a[1].id}|${a[0].id}` !== excludeKey);
+    if (filtered.length) splits = filtered;
+  }
   let best = null;
   for (const [a, b] of splits) {
     // 1) 최근 파트너/상대 겹침 회피 (처음 만나는 사람 우선) — 😊친목 모드에서는 훨씬 더 강하게 반영
@@ -177,7 +187,7 @@ function ManualPicker({ waitingPlayers, selected, onToggle, onConfirm, onAutoFil
       <p className="text-xs font-semibold text-stone-600">직접 선택 ({selected.length}/4)</p>
       <p className="text-[11px] text-stone-400">1~3명만 지정하고 나머지는 자동으로 채울 수도 있어요.</p>
       {waitingPlayers.length === 0 ? (
-        <p className="text-xs text-stone-400">대기 중인 인원이 없어요.</p>
+        <p className="text-xs text-stone-400">지금 고를 수 있는 사람이 없어요 (다들 경기 중이에요).</p>
       ) : (
         <div className="flex flex-wrap gap-2">
           {waitingPlayers.map((p) => {
@@ -1119,6 +1129,12 @@ function App() {
       return todayGamesPlayed(a.id) - todayGamesPlayed(b.id) || Math.random() - 0.5;
     });
 
+  // "직접 4명 선택"할 때는 "쉬고 싶어요"/제외 표시와 상관없이, 지금 다른 경기 중이 아닌
+  // 오늘 참석한 사람 전체 중에서 고를 수 있어요 (친구끼리 같이 넣고 싶을 때 등, 자동 매칭 후보가 아니어도 직접은 골라줄 수 있게).
+  const pickablePlayers = players
+    .filter((p) => !occupiedIds.has(p.id))
+    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+
   // 대기 인원 + "곧 끝날 것 같은" 경기 선수 수를 합친 것 — 다음 경기 미리 정하기 버튼을 보여줄지 판단할 때 써요
   const nearFinishPlayerIds = new Set();
   Object.values(courtMatches).forEach((m) => {
@@ -1467,7 +1483,10 @@ function App() {
     const m = courtMatches[courtNum];
     if (!m) return;
     const four = [...m.teamA, ...m.teamB];
-    const { a, b } = splitScore(four, matchCtx);
+    // 지금이랑 완전히 똑같은 조합이 나오면 "안 바뀐 것처럼" 보이니까, 지금 조합은 후보에서 빼고
+    // 남은 조합들 중에서 골라요 — 그래도 다 똑같으면(사실상 조합이 하나뿐일 때) 무작위로라도 하나 골라요.
+    const currentKey = `${four[0].id}|${four[1].id}`;
+    const { a, b } = splitScore(four, matchCtx, currentKey);
     const match = { ...m, teamA: a, teamB: b, scoreA: "", scoreB: "" };
     persistCourtMatches(courtNum, match);
   }
@@ -2053,7 +2072,7 @@ function App() {
                       </>
                     ) : (
                       <ManualPicker
-                        waitingPlayers={waitingPlayers}
+                        waitingPlayers={pickablePlayers}
                         selected={manualSelected}
                         onToggle={toggleManualPick}
                         onConfirm={() => confirmManualStart(courtNum)}
@@ -2267,7 +2286,7 @@ function App() {
                     ) : (
                       <div className="px-4 pb-4">
                         <ManualPicker
-                          waitingPlayers={waitingPlayers}
+                          waitingPlayers={pickablePlayers}
                           selected={manualSelected}
                           onToggle={toggleManualPick}
                           onConfirm={() => confirmManualStart(courtNum)}
