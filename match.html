@@ -114,6 +114,18 @@ function splitScore(four, ctx) {
   return best;
 }
 
+// 진짜 균등하게 섞는 셔플이에요. sort(() => Math.random()-0.5) 방식은 겉보기엔 무작위 같아도
+// 실제로는 특정 조합이 통계적으로 더 자주 뽑히는 편향이 있어서(자바스크립트에서 잘 알려진 함정이에요),
+// 계속 같은 사람끼리 매칭되는 원인이 될 수 있어요. 이 방식(Fisher–Yates)은 모든 순서가 정확히 똑같은 확률이에요.
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function generateRound(players, numCourts, hist, restIds = new Set(), skillOf = null) {
   const forcedRest = players.filter((p) => restIds.has(p.id));
   const pool = players.filter((p) => !restIds.has(p.id));
@@ -129,7 +141,7 @@ function generateRound(players, numCourts, hist, restIds = new Set(), skillOf = 
   let bestAssignment = null;
   let bestTotal = Infinity;
   for (let t = 0; t < 40; t++) {
-    const shuffled = [...usable].sort(() => Math.random() - 0.5);
+    const shuffled = shuffleArray(usable);
     let total = 0;
     const courts = [];
     for (let i = 0; i < shuffled.length; i += 4) {
@@ -1231,7 +1243,7 @@ function App() {
         // 진짜 무작위로 4명을 뽑아요 (오래 기다린 순서 안 따짐) — "랜덤 매칭"이니까요.
         // 팀을 나눌 때만 최근 파트너/상대 겹침을 피하는 쪽으로 골라요 — 완전 무작위로 나누면
         // 사람이 적을 때 자꾸 같은 조합이 반복될 수 있어서요.
-        const four = [...pool].sort(() => Math.random() - 0.5).slice(0, 4);
+        const four = shuffleArray(pool).slice(0, 4);
         const { a, b } = splitScore(four, matchCtx);
         const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
         const next = { ...current, [courtNum]: match };
@@ -1291,7 +1303,7 @@ function App() {
         if (pool.length < 4) {
           return { ok: false, reason: "notEnough" };
         }
-        const four = [...pool].sort(() => Math.random() - 0.5).slice(0, 4);
+        const four = shuffleArray(pool).slice(0, 4);
         const { a, b } = splitScore(four, matchCtx);
         const queued = { teamA: a, teamB: b };
         const nextData = { ...current, [courtNum]: { ...existing, next: queued } };
@@ -1438,7 +1450,7 @@ function App() {
     if (manualSelected.length < 1 || manualSelected.length >= 4) return;
     const chosen = players.filter((p) => manualSelected.includes(p.id));
     const restPool = waitingPlayers.filter((p) => !manualSelected.includes(p.id));
-    const shuffled = [...restPool].sort(() => Math.random() - 0.5);
+    const shuffled = shuffleArray(restPool);
     const need = 4 - chosen.length;
     if (shuffled.length < need) {
       appAlert(`대기 인원이 부족해요. (${need}명 더 필요해요)`);
