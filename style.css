@@ -97,3 +97,76 @@ body {
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: #e5e5e5; border-radius: 999px; }
+
+/* ==================================================================
+   Birdie 카드형 디자인 시스템 (매칭 화면 개편)
+   - 흰 배경 + 얇은 테두리 + 라운드 카드
+   - 네이비/블루 중심 + 팀별(A=블루/B=오렌지) 파스텔 대비
+   - 터치 영역 44px+ 확보
+   ================================================================== */
+:root {
+  --bc-navy: #16233D;
+  --bc-blue: #2563EB;
+  --bc-blue-soft: #EAF1FF;
+  --bc-blue-line: #D5E3FF;
+  --bc-orange: #EA580C;
+  --bc-orange-soft: #FFF2E7;
+  --bc-orange-line: #FBDCC0;
+  --bc-line: #E7E9EE;
+  --bc-sub: #7C8494;
+}
+
+/* bc-card was referenced everywhere but never defined — this was the
+   main reason cards looked flat/hard to read. Defining it fixes every
+   page (홈/회원/더보기/매칭) at once, not just this screen. */
+.bc-card {
+  background: #FFFFFF;
+  border: 1px solid var(--bc-line);
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
+}
+
+/* page background: 살짝 밝은 회색으로 카드가 뜨 보이게 */
+.bc-page-bg { background: #F5F7FA; }
+
+/* 손가락으로 누르기 편한 주요 액션 버튼 (44px+) */
+.bc-btn-lg {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  font-weight: 700;
+  font-size: 14px;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.bc-btn-lg:active { transform: scale(0.98); }
+.bc-btn-primary { background: var(--bc-blue); color: #fff; }
+.bc-btn-primary:disabled { background: #E5E7EB; color: #ABB1BC; }
+
+/* 팀 A / 팀 B 파스텔 대비 카드 */
+.bc-team-a { background: var(--bc-blue-soft); border: 1px solid var(--bc-blue-line); }
+.bc-team-b { background: var(--bc-orange-soft); border: 1px solid var(--bc-orange-line); }
+.bc-team-label-a { color: var(--bc-blue); }
+.bc-team-label-b { color: var(--bc-orange); }
+
+/* 상태 배지 */
+.bc-badge2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.bc-badge2-playing { background: #DCFCE7; color: #16A34A; }
+.bc-badge2-waiting { background: #FEF3C7; color: #B45309; }
+.bc-badge2-empty { background: #F1F5F9; color: #7C8494; }
+.bc-badge2-done { background: #E7E9EE; color: #475569; }
+
+@media (hover: hover) {
+  .bc-btn-primary:hover:not(:disabled) { filter: brightness(0.97); }
+}

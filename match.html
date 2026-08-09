@@ -1992,32 +1992,42 @@ function App() {
           )}
           {myStatus && !meetingEndedToday && (
             <div
-              className="rounded-2xl overflow-hidden"
+              className="bc-card overflow-hidden"
               style={
                 myStatus.type === "playing" || myStatus.type === "queued"
-                  ? { backgroundColor: "#1E2A3A", color: "white" }
-                  : { backgroundColor: "#F0FBF1", border: "1px solid #D5EEDB" }
+                  ? { backgroundColor: "var(--bc-navy)", color: "white", border: "none" }
+                  : {}
               }
             >
               {(myStatus.type === "playing" || myStatus.type === "queued") && (
                 <>
-                  <div className="px-4 pt-4 pb-3 flex items-center gap-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
-                    <span className="text-lg">🏸</span>
-                    <p className="headfont text-lg">코트 {myStatus.court}</p>
+                  <div className="px-4 pt-4 pb-2 flex items-center justify-between" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🏸</span>
+                      <p className="text-[11px] uppercase tracking-widest text-white/70">내 게임</p>
+                    </div>
+                    <span className={`bc-badge2 ${myStatus.type === "playing" ? "bc-badge2-playing" : "bc-badge2-waiting"}`}>
+                      {myStatus.type === "playing" ? "🟢 게임 진행 중" : "🔜 곧 시작"}
+                    </span>
                   </div>
-                  <div className="px-4 py-4">
-                    <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "#2563EB" }}>
-                      <p className="text-[10px] uppercase tracking-widest opacity-80 mb-1">A팀</p>
-                      <p className="text-base font-bold">나{myStatus.teammate && <> · {myStatus.teammate}</>}</p>
+                  <div className="px-4 pt-1 pb-4">
+                    <p className="headfont text-3xl mb-3">{myStatus.court}<span className="text-base font-normal opacity-70"> 코트</span></p>
+                    <div className="rounded-xl p-3.5" style={{ backgroundColor: "rgba(37,99,235,0.35)", border: "1px solid rgba(96,150,255,0.4)" }}>
+                      <p className="text-[11px] font-bold tracking-widest mb-1" style={{ color: "#93B6FF" }}>🔵 A팀</p>
+                      <p className="text-lg font-bold leading-snug">나{myStatus.teammate && <> · {myStatus.teammate}</>}</p>
                     </div>
-                    <p className="text-center text-xs opacity-60 my-2">VS</p>
-                    <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "#DC2626" }}>
-                      <p className="text-[10px] uppercase tracking-widest opacity-80 mb-1">B팀</p>
-                      <p className="text-base font-bold">{(myStatus.opponents || []).join(" · ") || "상대팀"}</p>
+                    <p className="text-center text-xs opacity-50 my-2 font-bold">VS</p>
+                    <div className="rounded-xl p-3.5" style={{ backgroundColor: "rgba(234,88,12,0.28)", border: "1px solid rgba(255,150,80,0.4)" }}>
+                      <p className="text-[11px] font-bold tracking-widest mb-1" style={{ color: "#FFB07A" }}>🟠 B팀</p>
+                      <p className="text-lg font-bold leading-snug">{(myStatus.opponents || []).join(" · ") || "상대팀"}</p>
                     </div>
-                    <p className="text-center text-sm font-bold mt-3">
-                      {myStatus.type === "playing" ? `✅ 코트 ${myStatus.court}번에서 경기 중이에요!` : `🔜 곧 코트 ${myStatus.court}번으로 이동해주세요!`}
-                    </p>
+                    <a
+                      href="#court-list"
+                      className="bc-btn-lg mt-3 w-full text-sm"
+                      style={{ backgroundColor: "rgba(255,255,255,0.12)", color: "white" }}
+                    >
+                      전체 코트 현황 보기 ↓
+                    </a>
                   </div>
                 </>
               )}
@@ -2095,7 +2105,7 @@ function App() {
               <button
                 onClick={startAllEmptyCourts}
                 disabled={batchStarting}
-                className="w-full mt-3 rounded-xl py-3 text-sm font-bold text-white disabled:opacity-60 shadow-sm"
+                className="bc-btn-lg bc-btn-primary w-full mt-3 text-sm disabled:opacity-60 shadow-sm"
                 style={{ backgroundColor: "#2563EB" }}
               >
                 {batchStarting ? "매칭 만드는 중..." : `🎲 자동 매칭 시작 (빈 코트 ${emptyCourtNums.length}개)`}
@@ -2158,18 +2168,24 @@ function App() {
             </div>
           )}
 
+          <div id="court-list" className="flex items-center justify-between pt-1 -mb-1">
+            <p className="text-xs uppercase tracking-widest text-stone-400">🏟️ 전체 코트 현황 ({numCourts}면)</p>
+          </div>
+
           {Array.from({ length: numCourts }, (_, i) => i + 1).map((courtNum) => {
             const raw = courtMatches[courtNum];
             const m = raw && raw.date === todayStr() ? raw : null; // 오늘 날짜가 아닌(예전) 경기는 화면상 비어있는 코트로 취급해요
             const isManualHere = manualCourt === courtNum;
+            const aWinDone = m && m.done && Number(m.scoreA) > Number(m.scoreB);
+            const bWinDone = m && m.done && Number(m.scoreB) > Number(m.scoreA);
             return (
               <div key={courtNum} className="rise-in bc-card overflow-hidden">
-                <div className="px-4 py-2.5 flex justify-between items-center" style={{ background: "linear-gradient(135deg, #52B858 0%, #3C9A45 100%)" }}>
-                  <span className="text-white text-[11px] font-bold uppercase tracking-[0.15em]">Court {courtNum} {lockedCourts.includes(courtNum) && "🔒"}</span>
+                <div className="px-4 py-2.5 flex justify-between items-center" style={{ background: "linear-gradient(135deg, #223A5E 0%, #16233D 100%)" }}>
+                  <span className="text-white text-[11px] font-bold uppercase tracking-[0.15em]">코트 {courtNum} {lockedCourts.includes(courtNum) && "🔒"}</span>
                   <div className="flex items-center gap-2">
-                    {m && m.done && <StatusPill tone="yellow">종료</StatusPill>}
-                    {m && !m.done && <StatusPill tone="green">경기중</StatusPill>}
-                    {!m && <StatusPill tone="gray">비어있음</StatusPill>}
+                    {m && m.done && <span className="bc-badge2 bc-badge2-done">종료</span>}
+                    {m && !m.done && <span className="bc-badge2 bc-badge2-playing">🟢 경기중</span>}
+                    {!m && <span className="bc-badge2 bc-badge2-empty">비어있음</span>}
                     {adminOn && (
                       <button onClick={() => toggleCourtLock(courtNum)} className="text-white/80 text-[10px] normal-case tracking-normal underline underline-offset-2">
                         {lockedCourts.includes(courtNum) ? "잠금해제" : "잠그기"}
@@ -2195,7 +2211,7 @@ function App() {
                         <button
                           onClick={() => startRandomMatchAsMember(courtNum)}
                           disabled={randomBusy === courtNum || waitingPlayers.length < 4}
-                          className="w-full rounded-xl py-3 font-semibold text-sm active:scale-[0.98] transition disabled:opacity-40 disabled:bg-stone-200 disabled:text-stone-400"
+                          className="bc-btn-lg w-full font-semibold text-sm active:scale-[0.98] transition disabled:opacity-40 disabled:bg-stone-200 disabled:text-stone-400"
                           style={waitingPlayers.length >= 4 ? { backgroundColor: "#FFD54F", color: "#5c4a00" } : {}}
                         >
                           {randomBusy === courtNum ? "생성 중..." : "🎲 랜덤 매칭으로 시작"}
@@ -2213,7 +2229,7 @@ function App() {
                         <button
                           onClick={() => startMatchOnCourt(courtNum)}
                           disabled={waitingPlayers.length < 4}
-                          className="w-full rounded-xl py-3 font-semibold text-sm bg-[#4CAF50] text-white active:scale-[0.98] transition disabled:bg-stone-200 disabled:text-stone-400"
+                          className="bc-btn-lg w-full font-semibold text-sm bg-[#4CAF50] text-white active:scale-[0.98] transition disabled:bg-stone-200 disabled:text-stone-400"
                         >
                           🔀 이 코트 경기 시작
                         </button>
@@ -2240,33 +2256,31 @@ function App() {
                   </div>
                 ) : (
                   <>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center px-4 py-4 gap-2">
-                      <div className="flex flex-col items-end gap-1.5">
-                        <div className="flex items-center gap-2 justify-end">
-                          <p className="text-sm font-medium leading-tight">{m.teamA[0].name}</p>
-                          <Avatar name={m.teamA[0].name} size={30} />
-                        </div>
-                        <div className="flex items-center gap-2 justify-end">
-                          <p className="text-sm font-medium leading-tight">{m.teamA[1].name}</p>
-                          <Avatar name={m.teamA[1].name} size={30} />
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-center gap-1">
-                        <div className="w-px h-4 bg-stone-300" />
-                        <span className="text-[10px] text-stone-400">VS</span>
-                        <div className="w-px h-4 bg-stone-300" />
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center gap-2">
-                          <Avatar name={m.teamB[0].name} size={30} />
-                          <p className="text-sm font-medium leading-tight">{m.teamB[0].name}</p>
+                    <div className="grid grid-cols-2 gap-2 px-4 py-4">
+                      <div className={`bc-team-a rounded-xl p-3 ${aWinDone ? "ring-2 ring-offset-1" : ""}`} style={aWinDone ? { "--tw-ring-color": "var(--bc-blue)" } : {}}>
+                        <p className="bc-team-label-a text-[10px] font-bold tracking-widest mb-2 flex items-center gap-1">🔵 A팀 {aWinDone && <span>🏆</span>}</p>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <Avatar name={m.teamA[0].name} size={26} />
+                          <p className="text-sm font-semibold leading-tight truncate">{m.teamA[0].name}</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Avatar name={m.teamB[1].name} size={30} />
-                          <p className="text-sm font-medium leading-tight">{m.teamB[1].name}</p>
+                          <Avatar name={m.teamA[1].name} size={26} />
+                          <p className="text-sm font-semibold leading-tight truncate">{m.teamA[1].name}</p>
+                        </div>
+                      </div>
+                      <div className={`bc-team-b rounded-xl p-3 ${bWinDone ? "ring-2 ring-offset-1" : ""}`} style={bWinDone ? { "--tw-ring-color": "var(--bc-orange)" } : {}}>
+                        <p className="bc-team-label-b text-[10px] font-bold tracking-widest mb-2 flex items-center gap-1">🟠 B팀 {bWinDone && <span>🏆</span>}</p>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <Avatar name={m.teamB[0].name} size={26} />
+                          <p className="text-sm font-semibold leading-tight truncate">{m.teamB[0].name}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Avatar name={m.teamB[1].name} size={26} />
+                          <p className="text-sm font-semibold leading-tight truncate">{m.teamB[1].name}</p>
                         </div>
                       </div>
                     </div>
+                    <p className="text-center text-[10px] text-stone-400 -mt-2 mb-1">VS</p>
                     <div className="flex items-center justify-center gap-3 pb-4">
                       <input
                         disabled={m.done}
@@ -2308,7 +2322,7 @@ function App() {
                         <button
                           onClick={() => finishMatch(courtNum)}
                           disabled={!((m.scoreA !== "" && m.scoreB !== "" && m.scoreA !== m.scoreB) || m.winnerOverride === "A" || m.winnerOverride === "B")}
-                          className="w-full py-2.5 text-sm font-semibold bg-[#FFD54F] text-[#5c4a00] disabled:bg-stone-200 disabled:text-stone-400 rounded-xl"
+                          className="bc-btn-lg w-full text-sm font-semibold bg-[#FFD54F] text-[#5c4a00] disabled:bg-stone-200 disabled:text-stone-400"
                         >
                           경기 종료
                         </button>
@@ -2353,7 +2367,7 @@ function App() {
                             </button>
                             {expandedTools[courtNum] && (
                               <div className="space-y-2 mt-1">
-                                <button onClick={() => reshuffleCourt(courtNum)} className="w-full py-2 text-xs font-semibold border border-stone-200 text-stone-500 rounded-xl">
+                                <button onClick={() => reshuffleCourt(courtNum)} className="bc-btn-lg w-full text-xs font-semibold border border-stone-200 text-stone-500">
                                   🔀 팀 다시 섞기
                                 </button>
                                 <button
@@ -2443,7 +2457,7 @@ function App() {
                         <button
                           onClick={() => startMatchOnCourt(courtNum)}
                           disabled={waitingPlayers.length < 4}
-                          className="w-full py-2.5 text-sm font-semibold bg-[#4CAF50] text-white rounded-xl disabled:bg-stone-200 disabled:text-stone-400"
+                          className="bc-btn-lg w-full text-sm font-semibold bg-[#4CAF50] text-white disabled:bg-stone-200 disabled:text-stone-400"
                         >
                           🔀 이 코트 다음 경기 시작
                         </button>
@@ -2511,8 +2525,7 @@ function App() {
           {myId && (() => {
             const s = lifetimeStatsFor(myId);
             const rate = s.games > 0 ? Math.round((s.wins / s.games) * 100) : 0;
-            const avgDiff = s.games > 0 ? ((s.pointsFor - s.pointsAgainst) / s.games).toFixed(1) : "0.0";
-            const recent = myRecentMatches(myId, 10);
+            const recent = myRecentMatches(myId, 20);
             const myMember = roster.find((r) => r.id === myId);
             const mySkill = getSkillScore(myMember);
             const myTier = tierForScore(mySkill, s.games);
@@ -2520,144 +2533,214 @@ function App() {
             const last5 = recent.slice(0, 5).map((m) => {
               const inA = (m.teamA || []).some((p) => p.id === myId);
               const won = inA ? Number(m.scoreA) > Number(m.scoreB) : Number(m.scoreB) > Number(m.scoreA);
-              return won ? "🟢" : "🔴";
-            }).join("");
+              return won;
+            });
             return (
-              <div className="rounded-2xl p-4 text-white" style={{ background: "linear-gradient(135deg, #52B858 0%, #3C9A45 100%)" }}>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[11px] uppercase tracking-widest text-white/80">🙋 내 기록</p>
-                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white/20">
-                    {myStage === "provisional0" ? "🆕 평가중" : `${myTier}급`}
-                  </span>
+              <div className="bc-card overflow-hidden">
+                {/* 프로필 영역 */}
+                <div className="p-4 flex items-center gap-3.5 border-b" style={{ borderColor: "var(--bc-line)" }}>
+                  <Avatar name={myMember ? myMember.name : "나"} size={56} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-lg font-bold text-stone-800 truncate">{myMember ? myMember.name : "나"}</p>
+                      <span
+                        className="bc-badge2"
+                        style={{ backgroundColor: "var(--bc-blue)", color: "white" }}
+                      >
+                        {myStage === "provisional0" ? "🆕 평가중" : myStage === "provisional1" ? "🟡 임시급수" : `${myTier}급`}
+                      </span>
+                    </div>
+                    <p className="text-sm text-stone-500 mt-0.5">실력점수 <b className="text-stone-700">{Math.round(mySkill)}</b>점</p>
+                    {myStage !== "rated" && (
+                      <p className="text-[11px] mt-1" style={{ color: "var(--bc-blue)" }}>
+                        {myStage === "provisional0" ? "평가중 → 10경기 이상 시 정식급수" : "임시급수 → 10경기 이상 시 정식급수"}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-center mb-3">
-                  <div>
-                    <p className="headfont text-2xl">{rate}<span className="text-xs font-normal">%</span></p>
-                    <p className="text-[10px] text-white/70">승률</p>
+
+                {s.games === 0 ? (
+                  /* 빈 상태: 아직 경기 기록이 없는 신규 회원 */
+                  <div className="px-4 py-8 text-center">
+                    <p className="text-3xl mb-2">🏸</p>
+                    <p className="text-sm font-semibold text-stone-600">아직 경기 기록이 없어요</p>
+                    <p className="text-xs text-stone-400 mt-1">첫 경기를 마치면 여기에 기록이 쌓여요.</p>
                   </div>
-                  <div>
-                    <p className="headfont text-2xl">{s.wins}<span className="text-xs font-normal">승</span> {s.losses}<span className="text-xs font-normal">패</span></p>
-                    <p className="text-[10px] text-white/70">전적 (총 {s.games}경기)</p>
-                  </div>
-                  <div>
-                    <p className="headfont text-2xl">{Math.round(mySkill)}</p>
-                    <p className="text-[10px] text-white/70">실력점수</p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs bg-white/10 rounded-lg px-2.5 py-2 mb-1">
-                  <span className="text-white/80">평균 득실차</span>
-                  <span className="font-semibold">{avgDiff > 0 ? "+" : ""}{avgDiff}점</span>
-                </div>
-                {last5 && (
-                  <div className="flex items-center justify-between text-xs bg-white/10 rounded-lg px-2.5 py-2">
-                    <span className="text-white/80">최근 5경기</span>
-                    <span className="text-sm tracking-wider">{last5}</span>
-                  </div>
-                )}
-                {myStage !== "rated" && (
-                  <p className="text-[10px] text-white/70 mt-2">
-                    {myStage === "provisional0" ? "5경기부터 임시급수, 10경기부터 정식급수가 매겨져요." : "10경기가 되면 정식급수로 바뀌어요."}
-                  </p>
-                )}
-                {recent.length > 0 && (
-                  <div className="pt-3 border-t border-white/20 space-y-1.5">
-                    <p className="text-[11px] text-white/80 mb-1">최근 경기</p>
-                    {recent.map((m) => {
-                      const inA = (m.teamA || []).some((p) => p.id === myId);
-                      const myScore = inA ? Number(m.scoreA) : Number(m.scoreB);
-                      const oppScore = inA ? Number(m.scoreB) : Number(m.scoreA);
-                      const won = myScore > oppScore;
-                      const diff = myScore - oppScore;
-                      const teammate = (inA ? m.teamA : m.teamB).find((p) => p.id !== myId);
-                      const opponents = (inA ? m.teamB : m.teamA).map((p) => p.name).join("·");
-                      return (
-                        <div key={m.id} className="bg-white/10 rounded-lg px-2.5 py-2 flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-xs">
-                              {teammate ? <><b>{teammate.name}</b>님과 </> : ""}
-                              <span className="text-white/70">vs</span> <b>{opponents}</b>
-                            </p>
-                            <p className="text-[10px] text-white/70 mt-0.5">{m.date} · {myScore}:{oppScore} ({diff > 0 ? "+" : ""}{diff}점차)</p>
+                ) : (
+                  <div className="grid grid-cols-2">
+                    {/* 경기 요약 */}
+                    <div className="p-4 space-y-2.5 border-r" style={{ borderColor: "var(--bc-line)" }}>
+                      <p className="text-xs font-bold text-stone-400 mb-1">경기 요약</p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-stone-500">총 경기</span>
+                        <span className="text-sm font-bold text-stone-800">{s.games}경기</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-stone-500">승</span>
+                        <span className="text-sm font-bold text-stone-800">{s.wins}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-stone-500">패</span>
+                        <span className="text-sm font-bold text-stone-800">{s.losses}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-stone-500">승률</span>
+                        <span className="text-sm font-bold" style={{ color: "var(--bc-blue)" }}>{rate}%</span>
+                      </div>
+                      {last5.length > 0 && (
+                        <div className="pt-1">
+                          <span className="text-sm text-stone-500 block mb-1.5">최근 5경기</span>
+                          <div className="flex gap-1">
+                            {last5.map((won, i) => (
+                              <span
+                                key={i}
+                                className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold"
+                                style={won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
+                              >
+                                {won ? "승" : "패"}
+                              </span>
+                            ))}
                           </div>
-                          <span
-                            className="shrink-0 text-[11px] font-bold px-2 py-1 rounded-full"
-                            style={won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
-                          >
-                            {won ? "승리" : "패배"}
-                          </span>
                         </div>
-                      );
-                    })}
+                      )}
+                    </div>
+
+                    {/* 최근 경기 기록 */}
+                    <div className="p-4">
+                      <p className="text-xs font-bold text-stone-400 mb-2">최근 경기 기록</p>
+                      {(() => {
+                        const renderRow = (m) => {
+                          const inA = (m.teamA || []).some((p) => p.id === myId);
+                          const won = inA ? Number(m.scoreA) > Number(m.scoreB) : Number(m.scoreB) > Number(m.scoreA);
+                          const shortDate = (m.date || "").slice(5).replace("-", "/");
+                          return (
+                            <div key={m.id} className="flex items-center justify-between">
+                              <span className="text-xs text-stone-500">{shortDate}</span>
+                              <span
+                                className="bc-badge2"
+                                style={won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
+                              >
+                                {won ? "승리" : "패배"}
+                              </span>
+                            </div>
+                          );
+                        };
+                        return (
+                          <>
+                            <div className="space-y-2">{recent.slice(0, 5).map(renderRow)}</div>
+                            {recent.length > 5 && (
+                              <details className="mt-2">
+                                <summary className="text-center text-[11px] font-semibold cursor-pointer list-none" style={{ color: "var(--bc-blue)" }}>더보기 ▾</summary>
+                                <div className="space-y-2 mt-2">{recent.slice(5, 20).map(renderRow)}</div>
+                              </details>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
                   </div>
                 )}
               </div>
             );
           })()}
 
-          <div>
-            <p className="text-sm font-semibold mb-2">🏆 통산 순위</p>
-            <div className="flex gap-1.5 mb-2 overflow-x-auto">
-              {["전체", "A", "B", "C", "D", "평가중"].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTierFilter(t)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border ${tierFilter === t ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                  style={tierFilter === t ? { backgroundColor: "#2563EB" } : {}}
-                >
-                  {t === "전체" ? "전체" : t === "평가중" ? "🆕 평가중" : `${t}급`}
-                </button>
-              ))}
-            </div>
-            <p className="text-[11px] text-stone-400 mb-2">기록은 저장돼서 새로고침해도 사라지지 않아요.</p>
-            <ul className="space-y-2">
-              {[...players]
-                .map((p) => ({ ...p, stats: lifetimeStatsFor(p.id) }))
-                .filter((p) => {
-                  if (tierFilter === "전체") return true;
-                  const memberRoster = roster.find((r) => r.id === p.id);
-                  const stage = evaluationStage(p.stats.games);
-                  const tier = stage === "provisional0" ? "평가중" : tierForScore(getSkillScore(memberRoster), p.stats.games);
-                  return tier === tierFilter;
-                })
-                .sort((a, b) => {
-                  const sa = getSkillScore(roster.find((r) => r.id === a.id));
-                  const sb = getSkillScore(roster.find((r) => r.id === b.id));
-                  return sb - sa;
-                })
-                .map((p, i) => {
-                  const memberRoster = roster.find((r) => r.id === p.id);
-                  const skillScoreVal = getSkillScore(memberRoster);
-                  const stage = evaluationStage(p.stats.games);
-                  const tier = stage === "provisional0" ? "평가중" : tierForScore(skillScoreVal, p.stats.games);
-                  const tc = tierColor(tier);
-                  return (
-                  <li key={p.id} className="bc-card px-4 py-3 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="scorefont text-sm text-stone-400 w-4">{i + 1}</span>
-                      <span className="text-sm font-medium">{p.name}</span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: tc.bg, color: tc.fg }}>
-                        {tier === "평가중" ? "🆕" : `${tier}급`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="scorefont text-sm text-stone-500">{p.stats.wins}승 {p.stats.losses}패</span>
-                      <span className="text-[11px] text-stone-400">{Math.round(skillScoreVal)}점</span>
-                      {adminOn && (
-                        <button onClick={() => correctPlayerStats(p)} className="text-[11px] text-stone-400 underline underline-offset-2">
-                          수정
-                        </button>
-                      )}
-                    </div>
-                  </li>
-                  );
-                })}
-              {players.length === 0 && (
-                <p className="text-sm text-stone-400 bg-white rounded-2xl p-5 text-center border border-dashed border-stone-300">
-                  참석자를 먼저 등록해주세요.
+          {(() => {
+            const RANKING_MIN_GAMES = 10; // 최소 10경기 이상부터 정식 랭킹에 반영 (그 전엔 평가중으로 별도 안내, 랭킹에서 제외)
+            const withStats = [...players].map((p) => ({ ...p, stats: lifetimeStatsFor(p.id) }));
+            const unrankedCount = withStats.filter((p) => p.stats.games < RANKING_MIN_GAMES).length;
+            const ranked = withStats
+              .filter((p) => p.stats.games >= RANKING_MIN_GAMES)
+              .filter((p) => {
+                if (tierFilter === "전체") return true;
+                const memberRoster = roster.find((r) => r.id === p.id);
+                const tier = tierForScore(getSkillScore(memberRoster), p.stats.games);
+                return tier === tierFilter;
+              })
+              .sort((a, b) => getSkillScore(roster.find((r) => r.id === b.id)) - getSkillScore(roster.find((r) => r.id === a.id)));
+            return (
+              <div>
+                <p className="text-sm font-semibold mb-2">🏆 랭킹 <span className="text-xs font-normal text-stone-400">(실력점수 기준)</span></p>
+                <div className="flex gap-1.5 mb-2 overflow-x-auto">
+                  {["전체", "A", "B", "C", "D"].map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setTierFilter(t)}
+                      className={`bc-btn-lg shrink-0 px-4 text-xs font-semibold border ${tierFilter === t ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
+                      style={tierFilter === t ? { backgroundColor: "var(--bc-blue)" } : {}}
+                    >
+                      {t === "전체" ? "전체" : `${t}급`}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-stone-400 mb-2">
+                  최소 {RANKING_MIN_GAMES}경기 이상부터 정식 랭킹에 올라가요. 승률은 개인 기록에서 확인할 수 있어요.
                 </p>
-              )}
-            </ul>
-          </div>
+
+                {/* 헤더 (모바일에서도 잘리지 않도록 비율 고정) */}
+                {ranked.length > 0 && (
+                  <div className="flex items-center px-4 py-1.5 text-[11px] font-semibold text-stone-400">
+                    <span className="w-7 shrink-0">순위</span>
+                    <span className="flex-1 min-w-0">이름</span>
+                    <span className="w-11 shrink-0 text-center">급수</span>
+                    <span className="w-14 shrink-0 text-right">점수</span>
+                    <span className="w-12 shrink-0 text-right">경기수</span>
+                  </div>
+                )}
+
+                <ul className="space-y-2">
+                  {ranked.map((p, i) => {
+                    const memberRoster = roster.find((r) => r.id === p.id);
+                    const skillScoreVal = getSkillScore(memberRoster);
+                    const tier = tierForScore(skillScoreVal, p.stats.games);
+                    const tc = tierColor(tier);
+                    const isMe = p.id === myId;
+                    return (
+                      <li
+                        key={p.id}
+                        className="bc-card px-4 py-3 flex items-center"
+                        style={isMe ? { backgroundColor: "var(--bc-blue-soft)", borderColor: "var(--bc-blue-line)" } : {}}
+                      >
+                        <span className={`scorefont text-sm w-7 shrink-0 font-bold ${i < 3 ? "" : "text-stone-400"}`} style={i < 3 ? { color: "var(--bc-blue)" } : {}}>
+                          {i + 1}
+                        </span>
+                        <span className="flex-1 min-w-0 text-sm font-semibold truncate flex items-center gap-1.5">
+                          {p.name}
+                          {isMe && <span className="text-[10px] font-bold" style={{ color: "var(--bc-blue)" }}>나</span>}
+                        </span>
+                        <span className="w-11 shrink-0 flex justify-center">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: tc.bg, color: tc.fg }}>
+                            {tier}급
+                          </span>
+                        </span>
+                        <span className="scorefont w-14 shrink-0 text-sm font-bold text-stone-700 text-right">{Math.round(skillScoreVal)}</span>
+                        <span className="scorefont w-12 shrink-0 text-xs text-stone-400 text-right">{p.stats.games}경기</span>
+                        {adminOn && (
+                          <button onClick={() => correctPlayerStats(p)} className="ml-2 text-[11px] text-stone-400 underline underline-offset-2 shrink-0">
+                            수정
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                  {players.length === 0 && (
+                    <p className="text-sm text-stone-400 bg-white rounded-2xl p-5 text-center border border-dashed border-stone-300">
+                      참석자를 먼저 등록해주세요.
+                    </p>
+                  )}
+                  {players.length > 0 && ranked.length === 0 && (
+                    <p className="text-sm text-stone-400 bc-card p-5 text-center">
+                      아직 {RANKING_MIN_GAMES}경기를 채운 회원이 없어요. 경기가 쌓이면 랭킹이 열려요.
+                    </p>
+                  )}
+                </ul>
+                {unrankedCount > 0 && (
+                  <p className="text-[11px] text-stone-400 mt-2 text-center">
+                    🆕 평가중 {unrankedCount}명 ({RANKING_MIN_GAMES}경기 미만, 랭킹 제외)
+                  </p>
+                )}
+              </div>
+            );
+          })()}
 
           <div>
             <p className="text-sm font-semibold mb-2">📋 경기 기록</p>
