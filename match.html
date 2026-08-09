@@ -1383,13 +1383,18 @@ function App() {
     if (waitingPlayers.length < 4) return;
     if (emptyCourtNums.length === 0) return;
     // 두세 코트가 한꺼번에 비어도 순서대로 다 채워요 — 인원이 되는 만큼 이어서 매칭해요.
+    // 혹시 모를 무한 재시도를 막기 위해, 한 번 실행에서 최대 코트 개수만큼만 시도해요.
     autoStartInFlight.current = true;
     (async () => {
+      let attempts = 0;
       for (const courtNum of emptyCourtNums) {
-        await startRandomMatchAsMember(courtNum);
+        if (attempts >= emptyCourtNums.length) break;
+        attempts++;
+        const ok = await startRandomMatchAsMember(courtNum, { silent: true });
+        if (!ok) break; // 실패했으면(대기 부족 등) 더 시도하지 않고 멈춰요
       }
     })().finally(() => {
-      setTimeout(() => { autoStartInFlight.current = false; }, 800);
+      setTimeout(() => { autoStartInFlight.current = false; }, 1500);
     });
   }, [autoStart, waitingPlayers.length, courtMatches, numCourts, lockedCourts, meetingEndedToday, myId]);
 
