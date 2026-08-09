@@ -26,6 +26,54 @@ function fmtBirthday(b) {
   return `${b.slice(0, 2)}월 ${b.slice(2, 4)}일`;
 }
 
+// ---------- 실력점수(ELO식) 시스템 ----------
+// 승률이랑은 별개로 관리되는 "매칭용 실력 지표"예요. 모든 신규 회원은 1,000점에서 시작하고,
+// 이기면 오르고 지면 내려가는데, 비슷한 상대한테 이기면 조금, 나보다 센 상대한테 이기면 더 많이 올라요.
+window.DEFAULT_SKILL_SCORE = 1000;
+
+function getSkillScore(member) {
+  return (member && typeof member.skillScore === "number") ? member.skillScore : window.DEFAULT_SKILL_SCORE;
+}
+
+// 팀 평균 점수끼리 비교해서, 이긴 쪽/진 쪽 점수를 얼마나 올리고 내릴지 계산해요 (K=20 기준: 비슷한 상대 이기면 약 +10점).
+function computeEloDelta(teamARating, teamBRating, aWon, K) {
+  const k = K || 20;
+  const expectedA = 1 / (1 + Math.pow(10, (teamBRating - teamARating) / 400));
+  const actualA = aWon ? 1 : 0;
+  const deltaA = Math.round(k * (actualA - expectedA));
+  return { deltaA, deltaB: -deltaA };
+}
+
+// 경기 수에 따라 "평가중 / 임시급수 / 정식급수" 단계를 나눠요 — 처음 몇 경기만으로 급수가 요동치지 않게요.
+function evaluationStage(gamesPlayed) {
+  if (gamesPlayed < 5) return "provisional0"; // 🆕 평가중
+  if (gamesPlayed < 10) return "provisional1"; // 🟡 임시급수
+  return "rated"; // 🟢 정식급수
+}
+window.EVAL_STAGE_LABEL = { provisional0: "🆕 평가중", provisional1: "🟡 임시급수", rated: "🟢 정식급수" };
+
+// 기본 급수 기준 (나중에 관리자가 조정할 수 있게 별도 설정으로 뺄 수 있어요. 지금은 고정값이에요.)
+window.TIER_THRESHOLDS = { A: 1100, B: 1000, C: 900 }; // A: 1100+, B: 1000~1099, C: 900~999, D: 899 이하
+
+function tierForScore(score, gamesPlayed) {
+  if (evaluationStage(gamesPlayed) === "provisional0") return "평가중";
+  if (score >= window.TIER_THRESHOLDS.A) return "A";
+  if (score >= window.TIER_THRESHOLDS.B) return "B";
+  if (score >= window.TIER_THRESHOLDS.C) return "C";
+  return "D";
+}
+
+function tierColor(tier) {
+  const map = {
+    "평가중": { bg: "#F4F4F2", fg: "#8A8A85" },
+    A: { bg: "#FDECEC", fg: "#C0392B" },
+    B: { bg: "#E8F5E9", fg: "#2E7D32" },
+    C: { bg: "#E3F2FD", fg: "#1565C0" },
+    D: { bg: "#F4F4F2", fg: "#8A8A85" },
+  };
+  return map[tier] || map["평가중"];
+}
+
 // 출생연도로 만 나이를 계산해요 (관리자만 볼 수 있는 정보예요)
 function computeAge(birthYear, birthday) {
   if (!birthYear) return null;

@@ -839,13 +839,12 @@ function App() {
     return map;
   })();
 
+  // 매칭용 실력 지표는 이제 "실력점수(ELO식, 1000점 시작)"를 써요 — 승률이랑은 별개로 관리되는 값이에요.
+  // 기존 균형 계산 가중치들이랑 스케일을 맞추려고 0~1 사이로 정규화해요(700~1300점 범위를 0~1로 매핑).
   function skillOf(id) {
-    const s = lifetimeStatsFor(id);
-    if (s.games >= MIN_GAMES_FOR_TIER) return s.wins / s.games;
-    // 경기 수가 적으면 가입할 때 스스로 고른 레벨을 대신 참고해요
     const m = roster.find((r) => r.id === id);
-    const lvl = m && m.level;
-    return (window.LEVEL_SKILL && window.LEVEL_SKILL[lvl]) || 0.5;
+    const raw = getSkillScore(m);
+    return Math.max(0, Math.min(1, (raw - 700) / 600));
   }
 
   const tierBadge = { 상: { emoji: "🔥", color: "text-red-500" }, 중: { emoji: "➖", color: "text-stone-400" }, 하: { emoji: "🌱", color: "text-green-600" } };
@@ -1163,8 +1162,10 @@ function App() {
       if (!m || m.done || m.date !== todayStr()) continue;
       const inCurrent = [...m.teamA, ...m.teamB].some((p) => p.id === myId);
       if (inCurrent) {
-        const teammate = [...m.teamA, ...m.teamB].find((p) => p.id !== myId && (m.teamA.some((x) => x.id === myId) ? m.teamA.some((x) => x.id === p.id) : m.teamB.some((x) => x.id === p.id)));
-        return { type: "playing", court: courtNum, teammate: teammate ? teammate.name : "" };
+        const onTeamA = m.teamA.some((x) => x.id === myId);
+        const teammate = (onTeamA ? m.teamA : m.teamB).find((p) => p.id !== myId);
+        const opponents = (onTeamA ? m.teamB : m.teamA).map((p) => p.name);
+        return { type: "playing", court: courtNum, teammate: teammate ? teammate.name : "", opponents };
       }
       if (m.next) {
         const inNext = [...m.next.teamA, ...m.next.teamB].some((p) => p.id === myId);
@@ -1244,11 +1245,12 @@ function App() {
     }
   }
 
-  async function startRandomMatchAsMember(courtNum) {
-    if (!myId) { appAlert("먼저 홈에서 이름으로 입장해주세요."); return; }
-    if (meetingEndedToday) { appAlert("오늘 모임이 이미 종료됐어요."); return; }
-    if (lockedCourts.includes(courtNum)) { appAlert("이 코트는 잠겨있어요."); return; }
-    if (randomBusy) return; // 중복 클릭 방지
+  async function startRandomMatchAsMember(courtNum, opts) {
+    const silent = opts && opts.silent;
+    if (!myId) { if (!silent) appAlert("먼저 홈에서 이름으로 입장해주세요."); return false; }
+    if (meetingEndedToday) { if (!silent) appAlert("오늘 모임이 이미 종료됐어요."); return false; }
+    if (lockedCourts.includes(courtNum)) { if (!silent) appAlert("이 코트는 잠겨있어요."); return false; }
+    if (randomBusy) return false; // 중복 클릭 방지
     setRandomBusy(courtNum);
     try {
       const result = await db.runTransaction(async (tx) => {
@@ -1278,14 +1280,19 @@ function App() {
         return { ok: true };
       });
       if (result && result.ok === false) {
-        if (result.reason === "occupied") appAlert("이미 다른 사람이 이 코트에 매칭을 만들었어요. 최신 상태로 화면이 갱신됐어요.");
-        else appAlert("대기 중인 인원이 4명 미만이에요.");
+        if (!silent) {
+          if (result.reason === "occupied") appAlert("이미 다른 사람이 이 코트에 매칭을 만들었어요. 최신 상태로 화면이 갱신됐어요.");
+          else appAlert("대기 중인 인원이 4명 미만이에요.");
+        }
+        return false;
       } else {
         setJustShuffled(true);
         setTimeout(() => setJustShuffled(false), 500);
+        return true;
       }
     } catch (e) {
-      appAlert("매칭 생성에 실패했어요. 다시 시도해주세요.");
+      if (!silent) appAlert("매칭 생성에 실패했어요. 다시 시도해주세요.");
+      return false;
     } finally {
       setRandomBusy(null);
     }
@@ -1364,26 +1371,49 @@ function App() {
 
   // 대기 인원이 4명 차면, 빈 코트가 있을 때 아무도 안 눌러도 자동으로 매칭을 시작해요 (관리자가 끌 수 있어요).
   // 여러 사람이 동시에 이 화면을 보고 있어도, startRandomMatchAsMember 자체가 트랜잭션이라 중복 생성은 안 돼요.
+  const emptyCourtNums = Array.from({ length: numCourts }, (_, i) => i + 1).filter((n) => {
+    if (lockedCourts.includes(n)) return false;
+    const m = courtMatches[n];
+    return !m || m.done || m.date !== todayStr();
+  });
+
   const autoStartInFlight = useRef(false);
   useEffect(() => {
     if (!autoStart || !myId || meetingEndedToday || autoStartInFlight.current) return;
     if (waitingPlayers.length < 4) return;
-    const freeCourts = Array.from({ length: numCourts }, (_, i) => i + 1).filter((n) => {
-      if (lockedCourts.includes(n)) return false;
-      const m = courtMatches[n];
-      return !m || m.done || m.date !== todayStr();
-    });
-    if (freeCourts.length === 0) return;
+    if (emptyCourtNums.length === 0) return;
     // 두세 코트가 한꺼번에 비어도 순서대로 다 채워요 — 인원이 되는 만큼 이어서 매칭해요.
     autoStartInFlight.current = true;
     (async () => {
-      for (const courtNum of freeCourts) {
+      for (const courtNum of emptyCourtNums) {
         await startRandomMatchAsMember(courtNum);
       }
     })().finally(() => {
       setTimeout(() => { autoStartInFlight.current = false; }, 800);
     });
   }, [autoStart, waitingPlayers.length, courtMatches, numCourts, lockedCourts, meetingEndedToday, myId]);
+
+  // "빈 코트 한번에 매칭 시작" — 처음 참석자 다 모였을 때 관리자든 회원이든 한 번에 눌러서 확 시작할 수 있게 해요.
+  const [batchStarting, setBatchStarting] = useState(false);
+  const [tierFilter, setTierFilter] = useState("전체"); // 통산 순위 급수 탭 필터
+  const [batchDoneMsg, setBatchDoneMsg] = useState("");
+  async function startAllEmptyCourts() {
+    if (!myId || batchStarting) return;
+    const targets = [...emptyCourtNums];
+    if (targets.length === 0) return;
+    setBatchStarting(true);
+    setBatchDoneMsg("");
+    let count = 0;
+    for (const courtNum of targets) {
+      const ok = await startRandomMatchAsMember(courtNum, { silent: true });
+      if (ok) count++;
+    }
+    setBatchStarting(false);
+    if (count > 0) {
+      setBatchDoneMsg(`🔔 ${count}게임 매칭 완료! 각자 화면에서 배정된 코트를 확인해주세요.`);
+      setTimeout(() => setBatchDoneMsg(""), 6000);
+    }
+  }
 
   function startMatchOnCourt(courtNum) {
     if (!adminOn) {
@@ -1498,7 +1528,7 @@ function App() {
     // 남은 조합들 중에서 골라요 — 그래도 다 똑같으면(사실상 조합이 하나뿐일 때) 무작위로라도 하나 골라요.
     const currentKey = `${four[0].id}|${four[1].id}`;
     const { a, b } = splitScore(four, matchCtx, currentKey);
-    const match = { ...m, teamA: a, teamB: b, scoreA: "", scoreB: "" };
+    const match = { ...m, teamA: a, teamB: b, scoreA: "", scoreB: "", winnerOverride: null };
     persistCourtMatches(courtNum, match);
   }
 
@@ -1523,10 +1553,47 @@ function App() {
     }, 350);
   }
 
+  // 실력점수(ELO식) 업데이트 — 경기가 끝나면 이긴 팀은 올라가고 진 팀은 내려가요.
+  // 비슷한 실력끼리 붙으면 조금, 나보다 센 상대를 이기면 더 많이 올라가요.
+  async function applySkillRatingUpdate(m, aWin) {
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.roster);
+        const data = snap.data() || {};
+        const list = data.members || [];
+        const byId = {};
+        list.forEach((mm) => { byId[mm.id] = mm; });
+        const teamAIds = m.teamA.map((p) => p.id);
+        const teamBIds = m.teamB.map((p) => p.id);
+        const ratingA = teamAIds.reduce((sum, id) => sum + getSkillScore(byId[id]), 0) / teamAIds.length;
+        const ratingB = teamBIds.reduce((sum, id) => sum + getSkillScore(byId[id]), 0) / teamBIds.length;
+        const { deltaA, deltaB } = computeEloDelta(ratingA, ratingB, aWin);
+        const next = list.map((mm) => {
+          if (teamAIds.includes(mm.id)) return { ...mm, skillScore: getSkillScore(mm) + deltaA };
+          if (teamBIds.includes(mm.id)) return { ...mm, skillScore: getSkillScore(mm) + deltaB };
+          return mm;
+        });
+        tx.set(REFS.roster, { members: next });
+      });
+    } catch (e) {}
+  }
+
+  // 점수 없이도 승/패만으로 경기를 끝낼 수 있게, 팀을 직접 지정할 수 있어요
+  function setWinnerOverride(courtNum, side) {
+    const m = courtMatches[courtNum];
+    if (!m) return;
+    persistCourtMatches(courtNum, { ...m, winnerOverride: m.winnerOverride === side ? null : side });
+  }
+
+  const [matchEndSummary, setMatchEndSummary] = useState(null);
+
   function finishMatch(courtNum) {
     const m = courtMatches[courtNum];
-    if (!m || m.scoreA === "" || m.scoreB === "" || m.scoreA === m.scoreB) return;
-    const aWin = Number(m.scoreA) > Number(m.scoreB);
+    if (!m) return;
+    const hasScores = m.scoreA !== "" && m.scoreB !== "" && m.scoreA !== m.scoreB;
+    const hasWinnerPick = m.winnerOverride === "A" || m.winnerOverride === "B";
+    if (!hasScores && !hasWinnerPick) return;
+    const aWin = hasScores ? Number(m.scoreA) > Number(m.scoreB) : m.winnerOverride === "A";
 
     setPlayers((ps) =>
       ps.map((p) => {
@@ -1551,8 +1618,20 @@ function App() {
       return nh;
     });
 
+    applySkillRatingUpdate(m, aWin);
+
+    // 경기 종료 요약을 잠깐 보여줘요
+    setMatchEndSummary({
+      court: courtNum,
+      teamA: m.teamA, teamB: m.teamB,
+      scoreA: m.scoreA, scoreB: m.scoreB,
+      hasScores, aWin,
+    });
+    setTimeout(() => setMatchEndSummary((s) => (s && s.court === courtNum ? null : s)), 6000);
+
     const finished = { ...m, done: true };
     delete finished.next;
+    delete finished.winnerOverride;
     setHistory((hArr) => [{ ...finished, round: matchSeq }, ...hArr]);
     logMatchResult({
       round: matchSeq,
@@ -1890,44 +1969,73 @@ function App() {
 
       {tab === "match" && (
         <section className="px-5 mt-5 space-y-4">
+          {matchEndSummary && (
+            <div className="rounded-2xl p-4" style={{ backgroundColor: "#FFFBEA", border: "1px solid #FFD54F" }}>
+              <p className="text-sm font-bold mb-2" style={{ color: "#B98900" }}>🏸 코트 {matchEndSummary.court} 게임 종료</p>
+              <p className="text-sm text-stone-700">
+                🔵 {matchEndSummary.teamA[0].name}·{matchEndSummary.teamA[1].name}
+                {matchEndSummary.hasScores ? <> : {matchEndSummary.scoreA}점</> : null}
+              </p>
+              <p className="text-sm text-stone-700">
+                🔴 {matchEndSummary.teamB[0].name}·{matchEndSummary.teamB[1].name}
+                {matchEndSummary.hasScores ? <> : {matchEndSummary.scoreB}점</> : null}
+              </p>
+              <p className="text-sm font-semibold mt-1" style={{ color: "#2E7D32" }}>
+                🏆 승리팀: {matchEndSummary.aWin ? `${matchEndSummary.teamA[0].name}·${matchEndSummary.teamA[1].name}` : `${matchEndSummary.teamB[0].name}·${matchEndSummary.teamB[1].name}`}
+              </p>
+            </div>
+          )}
           {myStatus && !meetingEndedToday && (
-            <div className="rounded-2xl p-4 flex items-center gap-3" style={{ backgroundColor: "#F0FBF1", border: "1px solid #D5EEDB" }}>
-              {myStatus.type === "playing" && (
+            <div
+              className="rounded-2xl overflow-hidden"
+              style={
+                myStatus.type === "playing" || myStatus.type === "queued"
+                  ? { backgroundColor: "#1E2A3A", color: "white" }
+                  : { backgroundColor: "#F0FBF1", border: "1px solid #D5EEDB" }
+              }
+            >
+              {(myStatus.type === "playing" || myStatus.type === "queued") && (
                 <>
-                  <span className="text-2xl">🏸</span>
-                  <p className="text-sm text-stone-700"><b>코트 {myStatus.court}</b>에서 {myStatus.teammate ? <>{myStatus.teammate}님과 </> : ""}경기 중이에요!</p>
-                </>
-              )}
-              {myStatus.type === "queued" && (
-                <>
-                  <span className="text-2xl">🔜</span>
-                  <p className="text-sm text-stone-700">
-                    다음 경기로 <b>코트 {myStatus.court}</b>에 예약돼 있어요
-                    {myStatus.teammate && <>, <b>{myStatus.teammate}</b>님과 한 팀이에요</>}
-                    {myStatus.opponents && myStatus.opponents.length > 0 && <> (상대: {myStatus.opponents.join(", ")})</>}
-                  </p>
+                  <div className="px-4 pt-4 pb-3 flex items-center gap-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
+                    <span className="text-lg">🏸</span>
+                    <p className="headfont text-lg">코트 {myStatus.court}</p>
+                  </div>
+                  <div className="px-4 py-4">
+                    <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "#2563EB" }}>
+                      <p className="text-[10px] uppercase tracking-widest opacity-80 mb-1">A팀</p>
+                      <p className="text-base font-bold">나{myStatus.teammate && <> · {myStatus.teammate}</>}</p>
+                    </div>
+                    <p className="text-center text-xs opacity-60 my-2">VS</p>
+                    <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "#DC2626" }}>
+                      <p className="text-[10px] uppercase tracking-widest opacity-80 mb-1">B팀</p>
+                      <p className="text-base font-bold">{(myStatus.opponents || []).join(" · ") || "상대팀"}</p>
+                    </div>
+                    <p className="text-center text-sm font-bold mt-3">
+                      {myStatus.type === "playing" ? `✅ 코트 ${myStatus.court}번에서 경기 중이에요!` : `🔜 곧 코트 ${myStatus.court}번으로 이동해주세요!`}
+                    </p>
+                  </div>
                 </>
               )}
               {myStatus.type === "waiting" && (
-                <>
+                <div className="flex items-center gap-3 p-4">
                   <span className="text-2xl">{myStatus.soon ? "⏱️" : "⏳"}</span>
                   <p className="text-sm text-stone-700">
                     현재 대기 <b>{myStatus.position}번째</b>
                     {myStatus.soon ? " — 곧 코트가 배정될 거예요!" : "예요."}
                   </p>
-                </>
+                </div>
               )}
               {myStatus.type === "resting" && (
-                <>
+                <div className="flex items-center gap-3 p-4">
                   <span className="text-2xl">☕</span>
                   <p className="text-sm text-stone-700">쉬는 중으로 설정되어 있어요. 다시 뛰고 싶으면 참석자 관리에서 해제해주세요.</p>
-                </>
+                </div>
               )}
               {myStatus.type === "notCheckedIn" && (
-                <>
+                <div className="flex items-center gap-3 p-4">
                   <span className="text-2xl">🙋</span>
                   <p className="text-sm text-stone-700">아직 오늘 참석 체크가 안 됐어요. 홈에서 참석 체크부터 해주세요!</p>
-                </>
+                </div>
               )}
             </div>
           )}
@@ -1953,6 +2061,16 @@ function App() {
                 </button>
               )}
             </div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div className="rounded-xl p-2.5" style={{ backgroundColor: "rgba(255,255,255,0.14)" }}>
+                <p className="text-[11px] text-white/80">🟢 게임 중</p>
+                <p className="headfont text-xl">{occupiedIds.size}<span className="text-xs font-normal">명</span></p>
+              </div>
+              <div className="rounded-xl p-2.5" style={{ backgroundColor: "rgba(255,255,255,0.14)" }}>
+                <p className="text-[11px] text-white/80">🟡 대기 중</p>
+                <p className="headfont text-xl">{waitingPlayers.length}<span className="text-xs font-normal">명</span></p>
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <p className="text-[11px] text-white/70">오늘 참석</p>
@@ -1962,15 +2080,28 @@ function App() {
                 <p className="text-[11px] text-white/70">추천 코트 수</p>
                 <p className="headfont text-2xl">{Math.max(1, Math.floor(players.length / 4)) || 0}<span className="text-sm font-normal">면</span></p>
               </div>
-              <div>
-                <p className="text-[11px] text-white/70">현재 대기</p>
-                <p className="headfont text-2xl">{waitingPlayers.length}<span className="text-sm font-normal">명</span></p>
-              </div>
-              <div>
+              <div className="col-span-2">
                 <p className="text-[11px] text-white/70">다음 추천</p>
                 <p className="text-sm font-semibold leading-snug">{waitingPlayers.slice(0, 4).map((p) => p.name).join(", ") || "-"}</p>
               </div>
             </div>
+
+            {!meetingEndedToday && emptyCourtNums.length > 0 && waitingPlayers.length >= 4 && (
+              <button
+                onClick={startAllEmptyCourts}
+                disabled={batchStarting}
+                className="w-full mt-3 rounded-xl py-3 text-sm font-bold text-white disabled:opacity-60 shadow-sm"
+                style={{ backgroundColor: "#2563EB" }}
+              >
+                {batchStarting ? "매칭 만드는 중..." : `🎲 자동 매칭 시작 (빈 코트 ${emptyCourtNums.length}개)`}
+              </button>
+            )}
+            {batchDoneMsg && (
+              <div className="mt-2 rounded-xl px-3 py-2 text-xs font-semibold text-center flex items-center justify-center gap-1.5" style={{ backgroundColor: "rgba(255,255,255,0.2)" }}>
+                <span>✅</span>{batchDoneMsg}
+              </div>
+            )}
+
             {(() => {
               const eligibleCount = players.filter((p) => !shuttlecockToday.exempt || !shuttlecockToday.exempt[p.id]).length;
               const submittedCount = players.filter((p) => shuttlecockToday.submitted && shuttlecockToday.submitted[p.id]).length;
@@ -1996,20 +2127,28 @@ function App() {
           {waitingPlayers.length > 0 && (
             <div className="bg-stone-100 rounded-2xl p-4 border border-stone-200">
               <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">⏳ 대기 중 ({waitingPlayers.length}명)</p>
-              <div className="flex flex-wrap gap-2">
-                {waitingPlayers.map((p, i) => (
-                  <span
-                    key={p.id}
-                    className={`text-xs pl-1 pr-2.5 py-1 rounded-full flex items-center gap-1.5 ${i < 4 ? "text-white font-semibold" : "bg-white text-stone-500 border border-stone-200"}`}
-                    style={i < 4 ? { backgroundColor: "#4CAF50" } : {}}
-                  >
-                    <Avatar name={p.name} size={20} />
-                    {i < 4 ? "🔜 " : ""}{p.name}
-                  </span>
-                ))}
+              <div className="space-y-1.5">
+                {waitingPlayers.map((p, i) => {
+                  const startedAt = waitStart[p.id];
+                  const mins = startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 60000)) : null;
+                  return (
+                    <div key={p.id} className="flex items-center justify-between bg-white rounded-xl px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <Avatar name={p.name} size={22} />
+                        <span className="text-sm font-medium text-stone-700">{i < 4 ? "🔜 " : ""}{p.name}</span>
+                      </div>
+                      <span
+                        className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                        style={i < 4 ? { backgroundColor: "#E8F0FE", color: "#2563EB" } : { backgroundColor: "#F4F4F2", color: "#8A8A85" }}
+                      >
+                        대기 {mins != null ? `${mins}분` : "-"}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
               {waitingPlayers.length >= 4 && (
-                <p className="text-[11px] text-stone-400 mt-2">🔜 표시된 4명이 다음 코트가 열리면 우선 배정돼요.</p>
+                <p className="text-[11px] text-stone-400 mt-2">🔜 표시된 4명이 다음 코트가 열리면 우선 배정돼요. 대기 시간이 긴 회원이 다음 게임에 우선 배정돼요.</p>
               )}
             </div>
           )}
@@ -2144,9 +2283,26 @@ function App() {
                     </div>
                     {!m.done ? (
                       <div className="px-4 pb-4 space-y-2">
+                        {/* 점수 입력이 귀찮으면, 승리팀만 골라도 경기를 끝낼 수 있어요 */}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setWinnerOverride(courtNum, "A")}
+                            className={`flex-1 py-2 rounded-xl text-xs font-semibold border ${m.winnerOverride === "A" ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
+                            style={m.winnerOverride === "A" ? { backgroundColor: "#4CAF50" } : {}}
+                          >
+                            🏆 {m.teamA[0].name}·{m.teamA[1].name} 승리
+                          </button>
+                          <button
+                            onClick={() => setWinnerOverride(courtNum, "B")}
+                            className={`flex-1 py-2 rounded-xl text-xs font-semibold border ${m.winnerOverride === "B" ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
+                            style={m.winnerOverride === "B" ? { backgroundColor: "#4CAF50" } : {}}
+                          >
+                            🏆 {m.teamB[0].name}·{m.teamB[1].name} 승리
+                          </button>
+                        </div>
                         <button
                           onClick={() => finishMatch(courtNum)}
-                          disabled={m.scoreA === "" || m.scoreB === "" || m.scoreA === m.scoreB}
+                          disabled={!((m.scoreA !== "" && m.scoreB !== "" && m.scoreA !== m.scoreB) || m.winnerOverride === "A" || m.winnerOverride === "B")}
                           className="w-full py-2.5 text-sm font-semibold bg-[#FFD54F] text-[#5c4a00] disabled:bg-stone-200 disabled:text-stone-400 rounded-xl"
                         >
                           경기 종료
@@ -2352,9 +2508,23 @@ function App() {
             const rate = s.games > 0 ? Math.round((s.wins / s.games) * 100) : 0;
             const avgDiff = s.games > 0 ? ((s.pointsFor - s.pointsAgainst) / s.games).toFixed(1) : "0.0";
             const recent = myRecentMatches(myId, 10);
+            const myMember = roster.find((r) => r.id === myId);
+            const mySkill = getSkillScore(myMember);
+            const myTier = tierForScore(mySkill, s.games);
+            const myStage = evaluationStage(s.games);
+            const last5 = recent.slice(0, 5).map((m) => {
+              const inA = (m.teamA || []).some((p) => p.id === myId);
+              const won = inA ? Number(m.scoreA) > Number(m.scoreB) : Number(m.scoreB) > Number(m.scoreA);
+              return won ? "🟢" : "🔴";
+            }).join("");
             return (
               <div className="rounded-2xl p-4 text-white" style={{ background: "linear-gradient(135deg, #52B858 0%, #3C9A45 100%)" }}>
-                <p className="text-[11px] uppercase tracking-widest text-white/80 mb-2">🙋 내 기록</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] uppercase tracking-widest text-white/80">🙋 내 기록</p>
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white/20">
+                    {myStage === "provisional0" ? "🆕 평가중" : `${myTier}급`}
+                  </span>
+                </div>
                 <div className="grid grid-cols-3 gap-2 text-center mb-3">
                   <div>
                     <p className="headfont text-2xl">{rate}<span className="text-xs font-normal">%</span></p>
@@ -2365,10 +2535,25 @@ function App() {
                     <p className="text-[10px] text-white/70">전적 (총 {s.games}경기)</p>
                   </div>
                   <div>
-                    <p className="headfont text-2xl">{avgDiff > 0 ? "+" : ""}{avgDiff}</p>
-                    <p className="text-[10px] text-white/70">평균 득실차</p>
+                    <p className="headfont text-2xl">{Math.round(mySkill)}</p>
+                    <p className="text-[10px] text-white/70">실력점수</p>
                   </div>
                 </div>
+                <div className="flex items-center justify-between text-xs bg-white/10 rounded-lg px-2.5 py-2 mb-1">
+                  <span className="text-white/80">평균 득실차</span>
+                  <span className="font-semibold">{avgDiff > 0 ? "+" : ""}{avgDiff}점</span>
+                </div>
+                {last5 && (
+                  <div className="flex items-center justify-between text-xs bg-white/10 rounded-lg px-2.5 py-2">
+                    <span className="text-white/80">최근 5경기</span>
+                    <span className="text-sm tracking-wider">{last5}</span>
+                  </div>
+                )}
+                {myStage !== "rated" && (
+                  <p className="text-[10px] text-white/70 mt-2">
+                    {myStage === "provisional0" ? "5경기부터 임시급수, 10경기부터 정식급수가 매겨져요." : "10경기가 되면 정식급수로 바뀌어요."}
+                  </p>
+                )}
                 {recent.length > 0 && (
                   <div className="pt-3 border-t border-white/20 space-y-1.5">
                     <p className="text-[11px] text-white/80 mb-1">최근 경기</p>
@@ -2381,14 +2566,20 @@ function App() {
                       const teammate = (inA ? m.teamA : m.teamB).find((p) => p.id !== myId);
                       const opponents = (inA ? m.teamB : m.teamA).map((p) => p.name).join("·");
                       return (
-                        <div key={m.id} className="bg-white/10 rounded-lg px-2.5 py-2">
-                          <p className="text-xs mb-1">
-                            {teammate ? <><b>{teammate.name}</b>님과 </> : ""}
-                            <span className="text-white/70">vs</span> <b>{opponents}</b>
-                          </p>
-                          <p className="text-xs font-semibold">
-                            {won ? "🟢 승리" : "🔴 패배"} · {myScore}:{oppScore} ({diff > 0 ? "+" : ""}{diff}점차)
-                          </p>
+                        <div key={m.id} className="bg-white/10 rounded-lg px-2.5 py-2 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs">
+                              {teammate ? <><b>{teammate.name}</b>님과 </> : ""}
+                              <span className="text-white/70">vs</span> <b>{opponents}</b>
+                            </p>
+                            <p className="text-[10px] text-white/70 mt-0.5">{m.date} · {myScore}:{oppScore} ({diff > 0 ? "+" : ""}{diff}점차)</p>
+                          </div>
+                          <span
+                            className="shrink-0 text-[11px] font-bold px-2 py-1 rounded-full"
+                            style={won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
+                          >
+                            {won ? "승리" : "패배"}
+                          </span>
                         </div>
                       );
                     })}
@@ -2400,19 +2591,52 @@ function App() {
 
           <div>
             <p className="text-sm font-semibold mb-2">🏆 통산 순위</p>
+            <div className="flex gap-1.5 mb-2 overflow-x-auto">
+              {["전체", "A", "B", "C", "D", "평가중"].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTierFilter(t)}
+                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border ${tierFilter === t ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
+                  style={tierFilter === t ? { backgroundColor: "#2563EB" } : {}}
+                >
+                  {t === "전체" ? "전체" : t === "평가중" ? "🆕 평가중" : `${t}급`}
+                </button>
+              ))}
+            </div>
             <p className="text-[11px] text-stone-400 mb-2">기록은 저장돼서 새로고침해도 사라지지 않아요.</p>
             <ul className="space-y-2">
               {[...players]
                 .map((p) => ({ ...p, stats: lifetimeStatsFor(p.id) }))
-                .sort((a, b) => b.stats.wins - a.stats.wins || b.stats.games - a.stats.games)
-                .map((p, i) => (
+                .filter((p) => {
+                  if (tierFilter === "전체") return true;
+                  const memberRoster = roster.find((r) => r.id === p.id);
+                  const stage = evaluationStage(p.stats.games);
+                  const tier = stage === "provisional0" ? "평가중" : tierForScore(getSkillScore(memberRoster), p.stats.games);
+                  return tier === tierFilter;
+                })
+                .sort((a, b) => {
+                  const sa = getSkillScore(roster.find((r) => r.id === a.id));
+                  const sb = getSkillScore(roster.find((r) => r.id === b.id));
+                  return sb - sa;
+                })
+                .map((p, i) => {
+                  const memberRoster = roster.find((r) => r.id === p.id);
+                  const skillScoreVal = getSkillScore(memberRoster);
+                  const stage = evaluationStage(p.stats.games);
+                  const tier = stage === "provisional0" ? "평가중" : tierForScore(skillScoreVal, p.stats.games);
+                  const tc = tierColor(tier);
+                  return (
                   <li key={p.id} className="bc-card px-4 py-3 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className="scorefont text-sm text-stone-400 w-4">{i + 1}</span>
                       <span className="text-sm font-medium">{p.name}</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: tc.bg, color: tc.fg }}>
+                        {tier === "평가중" ? "🆕" : `${tier}급`}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="scorefont text-sm text-stone-500">{p.stats.wins}승 {p.stats.losses}패</span>
+                      <span className="text-[11px] text-stone-400">{Math.round(skillScoreVal)}점</span>
                       {adminOn && (
                         <button onClick={() => correctPlayerStats(p)} className="text-[11px] text-stone-400 underline underline-offset-2">
                           수정
@@ -2420,7 +2644,8 @@ function App() {
                       )}
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               {players.length === 0 && (
                 <p className="text-sm text-stone-400 bg-white rounded-2xl p-5 text-center border border-dashed border-stone-300">
                   참석자를 먼저 등록해주세요.
