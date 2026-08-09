@@ -1,0 +1,2389 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>랜덤매칭 | Birdie</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="./style.css" />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="./firebase.js"></script>
+</head>
+<body>
+<div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#B0B0B0;font-family:sans-serif;font-size:13px;">🏸 불러오는 중...</div></div>
+<script type="text/babel" src="./app.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+const db = window.db;
+const ROSTER_REF = window.REFS.roster;
+const CHECKIN_REF = window.REFS.checkin;
+const RESTWISH_REF = window.REFS.restwish;
+
+// ---------- helpers ----------
+const pKey = (a, b) => [a, b].sort().join("|");
+
+function buildHistory() {
+  return { partner: {}, opponent: {} };
+}
+function bump(map, key) {
+  map[key] = (map[key] || 0) + 1;
+}
+
+// score a single 4-person court split
+// ctx: { hist, skillOf, mode, todayPairCount, isFirstTimer, isKindOrStrong }
+function splitScore(four, ctx) {
+  const { hist, skillOf, mode = "balance", todayPairCount, isFirstTimer, isKindOrStrong } = ctx || {};
+
+  // 🎲 랜덤 모드: 아무 계산 없이 완전 무작위로 팀을 갈라요
+  if (mode === "random") {
+    const splits = [
+      [[four[0], four[1]], [four[2], four[3]]],
+      [[four[0], four[2]], [four[1], four[3]]],
+      [[four[0], four[3]], [four[1], four[2]]],
+    ];
+    const [a, b] = splits[Math.floor(Math.random() * splits.length)];
+    return { s: 0, a, b };
+  }
+
+  const splits = [
+    [[four[0], four[1]], [four[2], four[3]]],
+    [[four[0], four[2]], [four[1], four[3]]],
+    [[four[0], four[3]], [four[1], four[2]]],
+  ];
+  let best = null;
+  for (const [a, b] of splits) {
+    // 1) 최근 파트너/상대 겹침 회피 (처음 만나는 사람 우선) — 😊친목 모드에서는 훨씬 더 강하게 반영
+    const historyWeight = mode === "social" ? 3 : 1;
+    const historyScore =
+      (hist.partner[pKey(a[0].id, a[1].id)] || 0) * 3 * historyWeight +
+      (hist.partner[pKey(b[0].id, b[1].id)] || 0) * 3 * historyWeight +
+      ((hist.opponent[pKey(a[0].id, b[0].id)] || 0) +
+        (hist.opponent[pKey(a[0].id, b[1].id)] || 0) +
+        (hist.opponent[pKey(a[1].id, b[0].id)] || 0) +
+        (hist.opponent[pKey(a[1].id, b[1].id)] || 0)) * historyWeight;
+
+    // 2) 오늘 같이 친 횟수 제한 — 2번까지는 약한 페널티, 3번째부터는 강하게 페널티
+    let todayPenalty = 0;
+    if (todayPairCount) {
+      const pairs = [
+        [a[0].id, a[1].id], [b[0].id, b[1].id],
+        [a[0].id, b[0].id], [a[0].id, b[1].id], [a[1].id, b[0].id], [a[1].id, b[1].id],
+      ];
+      pairs.forEach(([x, y]) => {
+        const c = todayPairCount(x, y);
+        todayPenalty += c >= 3 ? 500 : c * c * 6;
+      });
+    }
+
+    // 3) 실력 밸런스 — 모드에 따라 가중치가 달라져요 (친목 모드는 실력 거의 신경 안 씀)
+    const skillA = skillOf ? (skillOf(a[0].id) + skillOf(a[1].id)) / 2 : 0;
+    const skillB = skillOf ? (skillOf(b[0].id) + skillOf(b[1].id)) / 2 : 0;
+    const skillGap = Math.abs(skillA - skillB);
+    const skillWeight = mode === "skill" ? 14 : mode === "social" ? 1 : 8;
+    const skillScore = skillGap * skillWeight;
+
+    // 4) 균형 모드에서는 왕초보/초보끼리만 뭉치지 않도록, 팀 내부 실력차가 "적당히" 섞이는 조합을 살짝 선호
+    let mixBonus = 0;
+    if (mode === "balance" && skillOf) {
+      const teamAGap = Math.abs(skillOf(a[0].id) - skillOf(a[1].id));
+      const teamBGap = Math.abs(skillOf(b[0].id) - skillOf(b[1].id));
+      // 팀 내부가 너무 똑같은 하위권끼리만 묶이는 것 방지 (아주 약하게만 유도)
+      mixBonus = -(teamAGap + teamBGap) * 1.5;
+    }
+
+    // 5) 첫 참석자는 고수/친절왕과 한 팀이 되도록 유도 (😊친목 모드는 훨씬 강하게)
+    let firstTimerBonus = 0;
+    if (isFirstTimer && isKindOrStrong) {
+      const bonusWeight = mode === "social" ? 3 : 1;
+      [[a[0], a[1]], [b[0], b[1]]].forEach(([p1, p2]) => {
+        if (isFirstTimer(p1.id) && isKindOrStrong(p2.id)) firstTimerBonus -= 6 * bonusWeight;
+        if (isFirstTimer(p2.id) && isKindOrStrong(p1.id)) firstTimerBonus -= 6 * bonusWeight;
+      });
+    }
+
+    const s = historyScore + todayPenalty + skillScore + mixBonus + firstTimerBonus;
+    if (!best || s < best.s) best = { s, a, b };
+  }
+  return best;
+}
+
+function generateRound(players, numCourts, hist, restIds = new Set(), skillOf = null) {
+  const forcedRest = players.filter((p) => restIds.has(p.id));
+  const pool = players.filter((p) => !restIds.has(p.id));
+
+  const need = numCourts * 4;
+  const sorted = [...pool].sort(
+    (a, b) => a.gamesPlayed - b.gamesPlayed || Math.random() - 0.5
+  );
+  const playing = sorted.slice(0, need);
+  const usable = playing.slice(0, Math.floor(playing.length / 4) * 4);
+  const resting = [...forcedRest, ...sorted.slice(usable.length)];
+
+  let bestAssignment = null;
+  let bestTotal = Infinity;
+  for (let t = 0; t < 40; t++) {
+    const shuffled = [...usable].sort(() => Math.random() - 0.5);
+    let total = 0;
+    const courts = [];
+    for (let i = 0; i < shuffled.length; i += 4) {
+      const four = shuffled.slice(i, i + 4);
+      const { s, a, b } = splitScore(four, { hist, skillOf, mode: "balance", todayPairCount: () => 0, isFirstTimer: () => false, isKindOrStrong: () => false });
+      total += s;
+      courts.push({ teamA: a, teamB: b });
+    }
+    if (total < bestTotal) {
+      bestTotal = total;
+      bestAssignment = courts;
+    }
+  }
+
+  const matches = (bestAssignment || []).map((c, idx) => ({
+    id: uid(),
+    court: idx + 1,
+    teamA: c.teamA,
+    teamB: c.teamB,
+    scoreA: "",
+    scoreB: "",
+    done: false,
+  }));
+
+  return { matches, resting };
+}
+
+// ---------- main app ----------
+function ManualPicker({ waitingPlayers, selected, onToggle, onConfirm, onAutoFill, onCancel, pinnedPair, onTogglePin }) {
+  const selectedPlayers = waitingPlayers.filter((p) => selected.includes(p.id));
+  return (
+    <div className="text-left bg-stone-50 rounded-xl p-3 space-y-2">
+      <p className="text-xs font-semibold text-stone-600">직접 선택 ({selected.length}/4)</p>
+      <p className="text-[11px] text-stone-400">1~3명만 지정하고 나머지는 자동으로 채울 수도 있어요.</p>
+      {waitingPlayers.length === 0 ? (
+        <p className="text-xs text-stone-400">대기 중인 인원이 없어요.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {waitingPlayers.map((p) => {
+            const picked = selected.includes(p.id);
+            return (
+              <button
+                key={p.id}
+                onClick={() => onToggle(p.id)}
+                className={`px-2.5 py-1 rounded-full text-xs border transition ${
+                  picked ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"
+                }`}
+                style={picked ? { backgroundColor: "#4CAF50" } : {}}
+              >
+                {p.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {selected.length === 4 && (
+        <div className="pt-1 border-t border-stone-200">
+          <p className="text-[11px] text-stone-500 mt-2 mb-1">🔗 이 중 두 명을 같은 팀으로 고정 (선택)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {selectedPlayers.map((p) => {
+              const pinned = pinnedPair.includes(p.id);
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => onTogglePin(p.id)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] border transition ${
+                    pinned ? "text-white border-transparent" : "bg-white text-stone-400 border-stone-200"
+                  }`}
+                  style={pinned ? { backgroundColor: "#FFD54F", color: "#5c4a00" } : {}}
+                >
+                  {pinned ? "🔗 " : ""}{p.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      <div className="flex gap-2 pt-1">
+        {selected.length > 0 && selected.length < 4 ? (
+          <button
+            onClick={onAutoFill}
+            className="flex-1 rounded-lg py-2 text-xs font-semibold text-white"
+            style={{ backgroundColor: "#4CAF50" }}
+          >
+            나머지 {4 - selected.length}명 자동으로 채우고 시작
+          </button>
+        ) : (
+          <button
+            disabled={selected.length !== 4}
+            onClick={onConfirm}
+            className="flex-1 rounded-lg py-2 text-xs font-semibold text-white disabled:bg-stone-300 disabled:text-stone-500"
+            style={selected.length === 4 ? { backgroundColor: "#4CAF50" } : {}}
+          >
+            이 4명으로 시작
+          </button>
+        )}
+        <button onClick={onCancel} className="flex-1 rounded-lg py-2 text-xs font-semibold border border-stone-200 text-stone-500">
+          취소
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const MATCH_MODES = [
+  { key: "random", label: "🎲 랜덤", desc: "완전 무작위로 팀을 짜요." },
+  { key: "social", label: "😊 친목", desc: "같이 많이 안 쳐본 사람 위주로, 첫 참석자를 배려해서 짜요." },
+  { key: "balance", label: "⚖️ 균형 (추천)", desc: "실력, 오늘 같이 친 횟수, 첫 참석 여부까지 자동으로 종합해서 가장 공평하게 짜요. 운영자는 신경 안 써도 돼요." },
+  { key: "skill", label: "🏆 실력", desc: "비슷한 실력끼리 묶어서 진짜 승부가 되는 경기를 만들어요." },
+];
+
+// 🏸 운영 추천 — 대기시간/첫참석/반복매칭 같은, 이미 계산되고 있는 신호들을 사람이 읽는 문장으로 보여줘요.
+// "누구 쉬었지? 누구랑 붙이지?" 같은 운영자의 고민을 대신 알려주는 패널이에요.
+// 🏸 셔틀콕 제출 현황 — 참석이랑은 별개로, 오늘 셔틀콕 냈는지 체크리스트예요.
+// 본인 이름은 본인이 눌러서 체크하고, 관리자는 다른 사람 것도 대신 눌러줄 수 있어요.
+// 🏸 셔틀콕 관리 — 참석이랑은 별개예요.
+// 참석자별로 몇 개 냈는지 개수로 기록하고(첫 참석자는 면제), 게임 끝나고 멀쩡한 콕 개수를 입력하면 오늘 소모량이 자동 계산돼요.
+
+// 🏸 셔틀콕 관리 — 참석이랑은 별개예요. 참석자마다 "제출함/안함"만 간단히 체크하고,
+// 총 몇 개 받았는지·게임 후 몇 개 멀쩡한지는 관리자가 직접 숫자로 입력해요.
+// 숫자 직접 타이핑 대신, 휠처럼 스크롤해서 고르는 선택 상자예요 (모바일에서 select는 기본적으로 스크롤 목록으로 떠요).
+function NumberSelect({ value, onChange, max, disabled, placeholder, unit }) {
+  return (
+    <select
+      value={value == null ? "" : value}
+      onChange={(e) => onChange(e.target.value === "" ? null : parseInt(e.target.value, 10))}
+      disabled={disabled}
+      className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm bg-white disabled:bg-stone-100 disabled:text-stone-400"
+    >
+      <option value="">{placeholder || "선택"}</option>
+      {Array.from({ length: (max || 99) + 1 }, (_, i) => (
+        <option key={i} value={i}>{i}{unit != null ? unit : "개"}</option>
+      ))}
+    </select>
+  );
+}
+
+function ShuttlecockPanel({ players, myId, adminOn }) {
+  const [dayData, setDayData] = useState({ submitted: {}, exempt: {}, totalReceived: null, remaining: null });
+  useEffect(() => {
+    const unsub = REFS.shuttlecock.onSnapshot((snap) => {
+      const data = snap.data();
+      const all = (data && data.data) || {};
+      setDayData(all[todayStr()] || { submitted: {}, exempt: {}, totalReceived: null, remaining: null });
+    }, () => {});
+    return () => unsub();
+  }, []);
+
+  // 다들 거의 동시에 체크하는 상황이라 트랜잭션으로 안전하게 처리해요 — 매번 최신 값을 다시 읽고 그 위에 얹어써요.
+  function patchToday(patchFn) {
+    db.runTransaction(async (tx) => {
+      const snap = await tx.get(REFS.shuttlecock);
+      const data = snap.data() || {};
+      const all = data.data || {};
+      const today = all[todayStr()] || { submitted: {}, exempt: {}, totalReceived: null, remaining: null };
+      const nextDay = patchFn(today);
+      tx.set(REFS.shuttlecock, { data: { ...all, [todayStr()]: nextDay } });
+    }).catch(() => {});
+  }
+
+  function toggleSubmitted(id) {
+    if (!(adminOn || id === myId)) return;
+    patchToday((today) => ({ ...today, submitted: { ...today.submitted, [id]: !today.submitted[id] } }));
+  }
+
+  // 면제는 "앱 첫 사용"이 아니라 관리자가 직접 판단해서 켜고 꺼요 — 앱은 처음이어도 실제로는 오래된
+  // 멤버일 수 있어서, 자동으로 면제해주면 오히려 부정확할 수 있어요.
+  function toggleExempt(id) {
+    if (!adminOn) return;
+    patchToday((today) => {
+      const nextExempt = { ...(today.exempt || {}) };
+      if (nextExempt[id]) delete nextExempt[id]; else nextExempt[id] = true;
+      return { ...today, exempt: nextExempt };
+    });
+  }
+
+  function setNumberField(field, val) {
+    if (!adminOn) return;
+    patchToday((today) => ({ ...today, [field]: val }));
+  }
+
+  if (players.length === 0) return null;
+
+  const exemptMap = dayData.exempt || {};
+  const submittedMap = dayData.submitted || {};
+  const eligible = players.filter((p) => !exemptMap[p.id]);
+  const exemptList = players.filter((p) => exemptMap[p.id]);
+  const submittedCount = eligible.filter((p) => submittedMap[p.id]).length;
+  const consumed = (dayData.totalReceived != null && dayData.remaining != null) ? dayData.totalReceived - dayData.remaining : null;
+
+  return (
+    <div className="bc-card p-4">
+      <p className="text-sm font-semibold mb-1">🏸 셔틀콕 제출 현황 <span className="text-stone-400 font-normal">({submittedCount}/{eligible.length}명)</span></p>
+      <p className="text-[11px] text-stone-400 mb-3">
+        본인 이름을 눌러서 제출 체크하세요.
+        {adminOn && " 관리자는 \"면제\"로 특정 인원을 오늘만 뺄 수 있어요."}
+      </p>
+
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {eligible.map((p) => {
+          const canEdit = adminOn || p.id === myId;
+          const done = !!submittedMap[p.id];
+          return (
+            <button
+              key={p.id}
+              onClick={() => toggleSubmitted(p.id)}
+              disabled={!canEdit}
+              className={`text-xs pl-2.5 pr-1.5 py-1.5 rounded-full border tap-scale disabled:opacity-60 flex items-center gap-1 ${done ? "text-white border-transparent" : "bg-stone-50 text-stone-500 border-stone-200"}`}
+              style={done ? { backgroundColor: "#4CAF50" } : {}}
+            >
+              {done ? "🏸 " : ""}{p.name}
+              {adminOn && (
+                <span
+                  onClick={(e) => { e.stopPropagation(); toggleExempt(p.id); }}
+                  className={`text-[10px] px-1 rounded-full ${done ? "text-white/70" : "text-stone-300"}`}
+                  title="면제"
+                >✕</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {exemptList.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {exemptList.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => adminOn && toggleExempt(p.id)}
+              className="text-xs pl-2.5 pr-1.5 py-1.5 rounded-full bg-stone-50 text-stone-400 border border-stone-200 opacity-60 flex items-center gap-1"
+            >
+              {p.name}
+              {adminOn && <span className="text-[10px]">↩︎</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {adminOn && (
+        <div className="pt-3 border-t border-stone-100 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-stone-500 shrink-0 w-24">오늘 총 받은 개수</span>
+            <NumberSelect
+              value={dayData.totalReceived}
+              onChange={(v) => setNumberField("totalReceived", v)}
+              max={60}
+              placeholder="개수 선택"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-stone-500 shrink-0 w-24">게임 후 멀쩡한 콕</span>
+            <NumberSelect
+              value={dayData.remaining}
+              onChange={(v) => setNumberField("remaining", v)}
+              max={60}
+              placeholder="개수 선택"
+            />
+          </div>
+          {consumed != null && (
+            <p className="text-xs font-semibold text-right" style={{ color: consumed > 0 ? "#dc2626" : "#4CAF50" }}>
+              오늘 소모: {consumed}개
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OpsRecommendation({ waitingPlayers, players, matchhistory, matchMode, isFirstTimer, roster }) {
+  if (players.length === 0) return null;
+
+  // 우선순위별로 모아뒀다가, 너무 길어지지 않게 최대 4개까지만 보여줘요 (게임할수록 계속 쌓이던 문제 방지).
+  const urgentTips = []; // 오늘 반복 매칭 경고 — 가장 급한 것
+  const infoTips = []; // 대기 순서 / 첫 참석 안내
+  const modeTips = []; // 모드 추천
+
+  // 1) 오늘 이미 여러 번 같이 친 조합 (제일 급한 것부터 최대 2개만)
+  const today = todayStr();
+  const todayCounts = {};
+  matchhistory.forEach((m) => {
+    if (m.date !== today) return;
+    const all = [...(m.teamA || []), ...(m.teamB || [])];
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const k = pKey(all[i].id, all[j].id);
+        todayCounts[k] = (todayCounts[k] || 0) + 1;
+      }
+    }
+  });
+  Object.keys(todayCounts)
+    .filter((k) => todayCounts[k] >= 3)
+    .sort((a, b) => todayCounts[b] - todayCounts[a])
+    .slice(0, 2)
+    .forEach((k) => {
+      const [id1, id2] = k.split("|");
+      const p1 = players.find((p) => p.id === id1);
+      const p2 = players.find((p) => p.id === id2);
+      if (p1 && p2) urgentTips.push(`${p1.name}님과 ${p2.name}님은 오늘 벌써 ${todayCounts[k]}번 같이 쳤어요. 다른 조합을 추천해요.`);
+    });
+
+  // 2) 제일 오래 기다린 사람
+  if (waitingPlayers.length > 0) {
+    infoTips.push(`${waitingPlayers[0].name}님이 대기열 맨 앞이에요. 다음 코트에 우선 배정돼요.`);
+  }
+
+  // 3) 오늘 첫 참석자 (한 줄로 합쳐서 자리 안 차지하게)
+  const firstTimersToday = players.filter((p) => isFirstTimer(p.id));
+  if (firstTimersToday.length > 0) {
+    infoTips.push(`${firstTimersToday.map((p) => p.name).join(", ")}님은 오늘 첫 참석이에요. 친절하게 챙겨주세요 🌱`);
+  }
+
+  // 4) 오늘 모드 추천 (레벨 분포를 보고 판단)
+  if (matchMode !== "social") {
+    const beginnerCount = players.filter((p) => {
+      const m = (roster || []).find((r) => r.id === p.id);
+      return m && ["왕초보", "초보"].includes(m.level);
+    }).length;
+    if (players.length > 0 && beginnerCount / players.length >= 0.6) {
+      modeTips.push("오늘은 왕초보/초보 비중이 높아요. 😊 친목 모드를 추천해요.");
+    }
+  }
+
+  const tips = [...urgentTips, ...infoTips, ...modeTips].slice(0, 4);
+  if (tips.length === 0) return null;
+
+  return (
+    <div className="bc-card p-4">
+      <p className="text-sm font-semibold mb-2">🏸 운영 추천</p>
+      <ul className="space-y-1.5">
+        {tips.map((t, i) => (
+          <li key={i} className="text-xs text-stone-600 flex items-start gap-1.5">
+            <span style={{ color: "#4CAF50" }}>✓</span>
+            <span>{t}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function App() {
+  const [tab, setTab] = useState("match");
+  const [players, setPlayers] = useState([]);
+  const [roster, setRoster] = useState([]);
+  const [rosterReady, setRosterReady] = useState(false);
+  const [manageMode, setManageMode] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [addError, setAddError] = useState("");
+  const [showBackup, setShowBackup] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importMsg, setImportMsg] = useState("");
+  const [copyMsg, setCopyMsg] = useState("");
+  const backupInputRef = useRef(null);
+  const [numCourts, setNumCourts] = useState(2);
+  const [meetingEndedDate, setMeetingEndedDate] = useState(null);
+  const [autoStart, setAutoStart] = useState(true);
+
+  // 오늘 운영 카드에서 셔틀콕 제출 현황도 같이 보여주려고, 여기서도 살짝 구독해요 (셔틀콕 패널이랑 매칭 화면이 따로 놀지 않게).
+  const [shuttlecockToday, setShuttlecockToday] = useState({ submitted: {}, exempt: {} });
+  useEffect(() => {
+    const unsub = REFS.shuttlecock.onSnapshot((snap) => {
+      const data = snap.data();
+      const all = (data && data.data) || {};
+      setShuttlecockToday(all[todayStr()] || { submitted: {}, exempt: {} });
+    }, () => {});
+    return () => unsub();
+  }, []);
+  const [hist, setHist] = useState(buildHistory());
+  const [courtMatches, setCourtMatches] = useState({}); // { [courtNumber]: match | null }
+  const [matchSeq, setMatchSeq] = useState(0);
+  const [history, setHistory] = useState([]);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [rsvp, setRsvp] = useState({});
+  const [restWish, setRestWish] = useState({});
+  const [matchhistory, setMatchhistory] = useState([]);
+  const [statsAdjust, setStatsAdjust] = useState({});
+  const [checkinlog, setCheckinlog] = useState([]);
+  const [matchMode, setMatchMode] = useState("balance"); // "balance" | "skill"
+  const [excluded, setExcluded] = useState([]);
+  const [waitStart, setWaitStart] = useState({});
+  const [lockedCourts, setLockedCourts] = useState([]);
+  const [skillRankOffset, setSkillRankOffset] = useState(0);
+  const [kindVotes, setKindVotes] = useState([]);
+  const [schedule, setSchedule] = useState([]);
+  const [myId, setMyId] = useState(() => localStorage.getItem("bm_myId") || null);
+  const [pinOn, setPinOn] = useState(() => localStorage.getItem("bm_admin") === "1");
+  const ADMIN_PIN = window.ADMIN_PIN;
+  const adminOn = pinOn || isOfficerOf(roster, myId);
+
+  const canGenerate = players.length >= 4 && numCourts >= 1;
+  const maxCourts = Math.max(1, Math.floor(players.length / 4));
+
+  function chooseIdentity(id) {
+    localStorage.setItem("bm_myId", id);
+    setMyId(id);
+  }
+  function resetIdentity() {
+    localStorage.removeItem("bm_myId");
+    setMyId(null);
+  }
+  async function tryAdminUnlock() {
+    if (adminOn) return;
+    const pin = await appPrompt("관리자 비밀번호를 입력하세요", "", { password: true });
+    if (pin === ADMIN_PIN) {
+      localStorage.setItem("bm_admin", "1");
+      setPinOn(true);
+    } else if (pin !== null) {
+      appAlert("비밀번호가 틀렸어요.");
+    }
+  }
+  function adminLock() {
+    localStorage.removeItem("bm_admin");
+    setPinOn(false);
+  }
+
+  // ---- real-time sync from Firestore ----
+  useEffect(() => {
+    const unsub1 = ROSTER_REF.onSnapshot((snap) => {
+      const data = snap.data();
+      setRoster(data && data.members ? data.members : []);
+      setRosterReady(true);
+    }, () => setRosterReady(true));
+
+    const unsub2 = CHECKIN_REF.onSnapshot((snap) => {
+      const data = snap.data();
+      setRsvp(data && data.data ? data.data : {});
+    });
+
+    const unsub3 = RESTWISH_REF.onSnapshot((snap) => {
+      const data = snap.data();
+      setRestWish(data && data.data ? data.data : {});
+    });
+
+    const unsub4 = REFS.matchhistory.onSnapshot((snap) => {
+      const data = snap.data();
+      setMatchhistory(data && data.items ? data.items : []);
+    });
+
+    const unsub5 = REFS.statsadjust.onSnapshot((snap) => {
+      const data = snap.data();
+      setStatsAdjust(data && data.data ? data.data : {});
+    });
+
+    const unsub6 = REFS.courtmatches.onSnapshot((snap) => {
+      const data = snap.data();
+      const incoming = data && data.data ? data.data : {};
+      // 지금 타이핑 중(아직 서버에 저장 안 됨)인 점수 칸은, 실시간 동기화가 와도 덮어쓰지 않고 그대로 둬요.
+      // (다른 코트에서 뭔가 바뀔 때마다 전체가 새로고침되면서, 내가 입력 중인 값이 순간적으로 지워졌다 복구되는 문제 방지)
+      setCourtMatches((prev) => {
+        const merged = { ...incoming };
+        Object.keys(dirtyScoreFieldsRef.current).forEach((key) => {
+          const [cn, side] = key.split("|");
+          if (merged[cn] && prev[cn] && prev[cn][side] !== undefined) {
+            merged[cn] = { ...merged[cn], [side]: prev[cn][side] };
+          }
+        });
+        return merged;
+      });
+    }, () => {});
+
+    const unsub7 = REFS.checkinlog.onSnapshot((snap) => {
+      const data = snap.data();
+      setCheckinlog(data && data.items ? data.items : []);
+    }, () => {});
+
+    const unsub8 = REFS.matchmode.onSnapshot((snap) => {
+      const data = snap.data();
+      const storedMode = (data && data.mode) || "balance";
+      setMatchMode(["random", "social", "balance", "skill"].includes(storedMode) ? storedMode : "balance");
+      setExcluded((data && data.excluded) || []);
+      setWaitStart((data && data.waitStart) || {});
+      setLockedCourts((data && data.lockedCourts) || []);
+      setSkillRankOffset((data && data.skillRankOffset) || 0);
+      if (data && data.numCourts) setNumCourts(data.numCourts);
+      setMeetingEndedDate((data && data.meetingEndedDate) || null);
+      setAutoStart(data && data.autoStart !== undefined ? data.autoStart : true);
+    }, () => {});
+
+    const unsub9 = REFS.kindvotes.onSnapshot((snap) => {
+      const data = snap.data();
+      setKindVotes(data && data.items ? data.items : []);
+    }, () => {});
+
+    const unsub10 = REFS.schedule.onSnapshot((snap) => {
+      const data = snap.data();
+      setSchedule(data && data.items ? data.items : []);
+    }, () => {});
+
+    return () => {
+      unsub1();
+      unsub2();
+      unsub3();
+      unsub4();
+      unsub5();
+      unsub6();
+      unsub7();
+      unsub8();
+      unsub9();
+      unsub10();
+    };
+  }, []);
+
+  // 매칭 모드 / 제외 회원 / 대기시작시각 / 코트 잠금 / 실력전 순위블록 오프셋을 한 문서에 같이 저장해요
+  function persistMatchSettings(patch) {
+    const next = {
+      mode: patch.mode !== undefined ? patch.mode : matchMode,
+      excluded: patch.excluded !== undefined ? patch.excluded : excluded,
+      waitStart: patch.waitStart !== undefined ? patch.waitStart : waitStart,
+      lockedCourts: patch.lockedCourts !== undefined ? patch.lockedCourts : lockedCourts,
+      skillRankOffset: patch.skillRankOffset !== undefined ? patch.skillRankOffset : skillRankOffset,
+      numCourts: patch.numCourts !== undefined ? patch.numCourts : numCourts,
+      meetingEndedDate: patch.meetingEndedDate !== undefined ? patch.meetingEndedDate : meetingEndedDate,
+      autoStart: patch.autoStart !== undefined ? patch.autoStart : autoStart,
+    };
+    setMatchMode(next.mode);
+    setExcluded(next.excluded);
+    setWaitStart(next.waitStart);
+    setLockedCourts(next.lockedCourts);
+    setSkillRankOffset(next.skillRankOffset);
+    setNumCourts(next.numCourts);
+    setMeetingEndedDate(next.meetingEndedDate);
+    setAutoStart(next.autoStart);
+    REFS.matchmode.set(next).catch(() => {});
+  }
+
+  const meetingEndedToday = meetingEndedDate === todayStr();
+  async function endTodayMeeting() {
+    if (!adminOn) return;
+    const eligibleCount = players.filter((p) => !shuttlecockToday.exempt || !shuttlecockToday.exempt[p.id]).length;
+    const submittedCount = players.filter((p) => shuttlecockToday.submitted && shuttlecockToday.submitted[p.id]).length;
+    const notSubmitted = eligibleCount - submittedCount;
+    const warn = notSubmitted > 0 ? `\n\n🏸 아직 셔틀콕 안 낸 사람이 ${notSubmitted}명 있어요.` : "";
+    if (!(await appConfirm(`오늘 모임을 마칠까요? 이후 새 경기 시작이 막혀요.${warn}`))) return;
+    persistMatchSettings({ meetingEndedDate: todayStr() });
+  }
+  function reopenTodayMeeting() {
+    if (!adminOn) return;
+    persistMatchSettings({ meetingEndedDate: null });
+  }
+
+  function markWaiting(ids) {
+    const now = Date.now();
+    const nextWait = { ...waitStart };
+    ids.forEach((id) => { nextWait[id] = now; });
+    persistMatchSettings({ waitStart: nextWait });
+  }
+
+  function toggleExcluded(id) {
+    const next = excluded.includes(id) ? excluded.filter((x) => x !== id) : [...excluded, id];
+    persistMatchSettings({ excluded: next });
+  }
+
+  function toggleCourtLock(courtNum) {
+    const next = lockedCourts.includes(courtNum) ? lockedCourts.filter((x) => x !== courtNum) : [...lockedCourts, courtNum];
+    persistMatchSettings({ lockedCourts: next });
+  }
+
+  function voteKind(courtNum) {
+    const m = courtMatches[courtNum];
+    if (!m || !myId) return;
+    const allIds = [...m.teamA, ...m.teamB].map((p) => p.id);
+    if (!allIds.includes(myId)) {
+      appAlert("이 경기에 참여한 사람만 투표할 수 있어요.");
+      return;
+    }
+    const already = kindVotes.some((v) => v.matchId === m.id && v.voterId === myId);
+    if (already) return;
+    const votedFor = allIds.filter((id) => id !== myId);
+    const newVotes = votedFor.map((id) => ({ id: uid(), matchId: m.id, voterId: myId, votedForId: id, date: todayStr() }));
+    const next = [...kindVotes, ...newVotes];
+    setKindVotes(next);
+    REFS.kindvotes.set({ items: next }).catch(() => {});
+  }
+
+  // 오늘 이 두 사람이 이미 몇 번 같이(파트너든 상대든) 경기했는지
+  function todayPairCount(idA, idB) {
+    const today = todayStr();
+    let count = 0;
+    matchhistory.forEach((m) => {
+      if (m.date !== today) return;
+      const ids = [...(m.teamA || []), ...(m.teamB || [])].map((p) => p.id);
+      if (ids.includes(idA) && ids.includes(idB)) count++;
+    });
+    return count;
+  }
+
+  function isFirstTimer(id) {
+    return checkinlog.filter((c) => c.memberId === id).length <= 1;
+  }
+
+  function isKindOrStrong(id) {
+    const m = roster.find((r) => r.id === id);
+    if (m && m.manualBadges && (m.manualBadges.kind || m.manualBadges.chat)) return true;
+    return skillOf(id) >= 0.65;
+  }
+
+  // 코트별 진행중인 경기를 로컬 상태 + Firestore에 같이 저장해서, 다른 사람 화면에도 실시간으로 보여요
+  // 코트 하나의 상태만 안전하게 바꿔요 — 예전엔 "지금 내가 알고 있는 전체 코트 현황"을 통째로 덮어썼는데,
+  // 그러면 다른 코트가 거의 동시에 바뀔 때 서로 씹어먹는 문제가 있었어요(코트마다 따로 끝나는 게 당연한데도요).
+  // 트랜잭션으로 항상 최신 데이터를 다시 읽어서, 이 코트 하나만 안전하게 바꿔요.
+  async function persistCourtMatches(courtNum, valueOrUpdater) {
+    // 화면은 즉시(로컬) 바로 업데이트해서 "경기 종료" 누른 순간 바로 대기 인원에 반영되게 하고,
+    // 서버 저장은 트랜잭션으로 안전하게 백그라운드에서 처리해요 (다른 코트랑 안 부딪히게).
+    setCourtMatches((prev) => {
+      const newVal = typeof valueOrUpdater === "function" ? valueOrUpdater(prev[courtNum]) : valueOrUpdater;
+      return { ...prev, [courtNum]: newVal };
+    });
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const prev = current[courtNum];
+        const newVal = typeof valueOrUpdater === "function" ? valueOrUpdater(prev) : valueOrUpdater;
+        const next = { ...current, [courtNum]: newVal };
+        tx.set(REFS.courtmatches, { data: next });
+      });
+    } catch (e) {
+      appAlert("반영에 실패했어요. 다시 시도해주세요.");
+    }
+  }
+
+  // 오늘 몇 경기 했는지 — matchhistory(공유 저장소) 기준이라 기기 상관없이 다 같이 봐요
+  function todayGamesPlayed(id) {
+    const today = todayStr();
+    return matchhistory.filter(
+      (m) => m.date === today && ((m.teamA || []).some((p) => p.id === id) || (m.teamB || []).some((p) => p.id === id))
+    ).length;
+  }
+
+  // 통산 전적(승/패/경기수) — matchhistory(영구 저장)에서 계산 + 관리자 수동 보정값 반영
+  function lifetimeStatsFor(id) {
+    let games = 0, wins = 0, losses = 0;
+    matchhistory.forEach((m) => {
+      const inA = (m.teamA || []).some((p) => p.id === id);
+      const inB = (m.teamB || []).some((p) => p.id === id);
+      if (!inA && !inB) return;
+      games++;
+      const aWin = Number(m.scoreA) > Number(m.scoreB);
+      const won = (inA && aWin) || (inB && !aWin);
+      if (won) wins++; else losses++;
+    });
+    const adj = statsAdjust[id];
+    if (adj) {
+      wins += adj.winsAdj || 0;
+      losses += adj.lossesAdj || 0;
+      games += (adj.winsAdj || 0) + (adj.lossesAdj || 0);
+    }
+    return { games, wins: Math.max(0, wins), losses: Math.max(0, losses) };
+  }
+
+  const MIN_GAMES_FOR_TIER = 3;
+
+  // 승률 기반 실력 등급(상/중/하) — 오늘 참석자 안에서 상대적으로 나눠요
+  const tierMap = (() => {
+    const withRate = players.map((p) => {
+      const s = lifetimeStatsFor(p.id);
+      const rate = s.games >= MIN_GAMES_FOR_TIER ? s.wins / s.games : null;
+      return { id: p.id, rate };
+    });
+    const ranked = withRate.filter((p) => p.rate !== null).sort((a, b) => b.rate - a.rate);
+    const n = ranked.length;
+    const topCut = Math.ceil(n / 3);
+    const midCut = Math.ceil((n * 2) / 3);
+    const map = {};
+    ranked.forEach((p, i) => {
+      map[p.id] = i < topCut ? "상" : i < midCut ? "중" : "하";
+    });
+    withRate.forEach((p) => {
+      if (map[p.id] === undefined) map[p.id] = "중"; // 경기 수 부족하면 중간 취급
+    });
+    return map;
+  })();
+
+  function skillOf(id) {
+    const s = lifetimeStatsFor(id);
+    if (s.games >= MIN_GAMES_FOR_TIER) return s.wins / s.games;
+    // 경기 수가 적으면 가입할 때 스스로 고른 레벨을 대신 참고해요
+    const m = roster.find((r) => r.id === id);
+    const lvl = m && m.level;
+    return (window.LEVEL_SKILL && window.LEVEL_SKILL[lvl]) || 0.5;
+  }
+
+  const tierBadge = { 상: { emoji: "🔥", color: "text-red-500" }, 중: { emoji: "➖", color: "text-stone-400" }, 하: { emoji: "🌱", color: "text-green-600" } };
+
+  // 관리자가 개인 전적을 직접 원하는 값으로 고쳐요 (실제 경기기록은 그대로 두고, 보정값만 얹어요)
+  // 개별 경기 기록의 점수를 직접 고쳐요 — 이렇게 하면 그 경기가 걸려있는 승/패, 통산 순위도 자동으로 같이 맞춰져요
+  // (따로 "승/패 보정"을 안 해도, 애초에 원인이 되는 점수 자체를 고치는 게 더 정확해요).
+  async function editMatchRecord(m, field, value) {
+    if (!adminOn) return;
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.matchhistory);
+        const data = snap.data() || {};
+        const items = (data.items || []).map((it) => it.id === m.id ? { ...it, [field]: value } : it);
+        tx.set(REFS.matchhistory, { items });
+      });
+    } catch (e) {
+      appAlert("점수 수정에 실패했어요. 다시 시도해주세요.");
+    }
+  }
+
+  async function deleteMatchRecord(m) {
+    if (!adminOn) return;
+    if (!(await appConfirm(`${m.date} · Court ${m.court} 경기 기록을 삭제할까요? 되돌릴 수 없어요.`))) return;
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.matchhistory);
+        const data = snap.data() || {};
+        const items = (data.items || []).filter((it) => it.id !== m.id);
+        tx.set(REFS.matchhistory, { items });
+      });
+    } catch (e) {
+      appAlert("삭제에 실패했어요. 다시 시도해주세요.");
+    }
+  }
+
+  async function correctPlayerStats(p) {
+    const current = lifetimeStatsFor(p.id);
+    const winInput = await appPrompt(`${p.name}님의 정확한 승 수를 입력해주세요`, String(current.wins));
+    if (winInput === null) return;
+    const lossInput = await appPrompt(`${p.name}님의 정확한 패 수를 입력해주세요`, String(current.losses));
+    if (lossInput === null) return;
+    const newWins = parseInt(winInput, 10);
+    const newLosses = parseInt(lossInput, 10);
+    if (isNaN(newWins) || isNaN(newLosses) || newWins < 0 || newLosses < 0) {
+      appAlert("숫자를 정확히 입력해주세요.");
+      return;
+    }
+    // 실제 경기기록 기준값과의 차이를 보정값으로 저장
+    let rawGames = 0, rawWins = 0, rawLosses = 0;
+    matchhistory.forEach((m) => {
+      const inA = (m.teamA || []).some((x) => x.id === p.id);
+      const inB = (m.teamB || []).some((x) => x.id === p.id);
+      if (!inA && !inB) return;
+      const aWin = Number(m.scoreA) > Number(m.scoreB);
+      const won = (inA && aWin) || (inB && !aWin);
+      if (won) rawWins++; else rawLosses++;
+    });
+    const next = { ...statsAdjust, [p.id]: { winsAdj: newWins - rawWins, lossesAdj: newLosses - rawLosses } };
+    setStatsAdjust(next);
+    REFS.statsadjust.set({ data: next }).catch(() => {});
+  }
+
+  // 양방향 동기화: 일정에서 참석하면 매칭 참석자에 추가되고, 일정에서 취소하면 매칭 참석자에서도 빠져요
+  // (단, 지금 경기 중인 사람은 경기 끝날 때까지는 그대로 두고, 다음부터 안 뽑히게만 해요 — 게스트는 이 로직 대상 아니에요)
+  // 홈 화면이랑 똑같이 "일정 참석 + 체크인 기록"을 합쳐서 봐요 — 하나만 보면 홈이랑 인원수가 서로 달라 보일 수 있어서요.
+  useEffect(() => {
+    if (!roster.length) return;
+    setPlayers((prev) => {
+      const todayAttendees = combinedTodayAttendees(schedule, checkinlog, roster);
+      const attendeeIds = new Set(todayAttendees.map((a) => a.id));
+      const keptGuests = prev.filter((p) => String(p.id).startsWith("guest_"));
+      const attendingMembers = todayAttendees.map((a) => {
+        const existing = prev.find((p) => p.id === a.id);
+        if (existing) return existing;
+        const m = roster.find((r) => r.id === a.id);
+        return { id: a.id, name: (m && m.name) || a.name, gamesPlayed: 0, wins: 0, losses: 0 };
+      });
+      // 지금 경기 중인 사람은 일정에서 취소했더라도, 진행 중인 경기가 안 깨지게 그대로 유지해줘요
+      const stillPlaying = prev.filter((p) => {
+        if (attendeeIds.has(p.id) || String(p.id).startsWith("guest_")) return false;
+        return Object.values(courtMatches).some((m) => m && !m.done && m.date === todayStr() && [...m.teamA, ...m.teamB].some((x) => x.id === p.id));
+      });
+      const next = [...attendingMembers, ...keptGuests, ...stillPlaying];
+      // 실제로 뭔가 달라졌을 때만 새 배열을 반환해서 불필요한 리렌더를 줄여요
+      const sameLength = next.length === prev.length;
+      const sameIds = sameLength && next.every((p) => prev.some((pp) => pp.id === p.id));
+      return sameIds ? prev : next;
+    });
+  }, [rsvp, roster, schedule, courtMatches, checkinlog]);
+
+  function persistRoster(next) {
+    setRoster(next);
+    ROSTER_REF.set({ members: next }).catch(() => {});
+  }
+
+  function setMyRsvp(memberId, status) {
+    const next = { ...rsvp, [memberId]: status };
+    setRsvp(next);
+    CHECKIN_REF.set({ data: next }).catch(() => {});
+    if (status === "in") {
+      logAttendance(memberId);
+      markWaiting([memberId]);
+      // 참석으로 표시하면 자동으로 오늘 참석자(매칭 대상) 명단에도 들어가요 — 따로 또 누를 필요 없어요
+      setPlayers((p) => {
+        if (p.some((x) => x.id === memberId)) return p;
+        const m = roster.find((r) => r.id === memberId);
+        if (!m) return p;
+        return [...p, { id: m.id, name: m.name, gamesPlayed: 0, wins: 0, losses: 0 }];
+      });
+    } else if (status === "out") {
+      setPlayers((p) => p.filter((x) => x.id !== memberId));
+    }
+    // 관리자가 여기서 "고정 멤버"로 직접 체크해도, 더보기 → 일정의 오늘 모임에 정식으로 ✅참석한 것과 똑같이 처리돼요
+    // (일정에도 그 사람 이름이 뜨고, 나중에 참석 기록/통계도 일정 RSVP 기준이랑 일치해요).
+    const todayEvent = schedule.find((s) => s.date === todayStr());
+    if (todayEvent) {
+      const m = roster.find((r) => r.id === memberId);
+      setRsvpFor(todayEvent, status === "in" ? "in" : "out", memberId, m ? m.name : "?");
+    }
+  }
+
+  function toggleRestWish(memberId) {
+    const next = { ...restWish };
+    if (next[memberId]) delete next[memberId];
+    else next[memberId] = true;
+    setRestWish(next);
+    RESTWISH_REF.set({ data: next }).catch(() => {});
+  }
+
+  function clearRestWish() {
+    setRestWish({});
+    RESTWISH_REF.set({ data: {} }).catch(() => {});
+  }
+
+  async function resetCheckins() {
+    if (!(await appConfirm("모든 체크인 기록을 초기화할까요? (참석/불참 전부 지워지고, 참석자 명단도 비워져요)"))) return;
+    setRsvp({});
+    CHECKIN_REF.set({ data: {} }).catch(() => {});
+    setPlayers([]);
+  }
+
+  const backupCode = roster.map((m) => m.name).join(",");
+
+  async function copyBackup() {
+    if (!roster.length) {
+      setCopyMsg("등록된 멤버가 없어요.");
+      return;
+    }
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(backupCode);
+      ok = true;
+    } catch (e) {}
+    if (!ok && backupInputRef.current) {
+      try {
+        backupInputRef.current.focus();
+        backupInputRef.current.select();
+        ok = document.execCommand("copy");
+      } catch (e) {}
+    }
+    setCopyMsg(ok ? "복사됐어요!" : "자동 복사가 안 돼요. 위 박스를 탭해서 직접 복사해주세요.");
+    setTimeout(() => setCopyMsg(""), 3000);
+  }
+
+  function importRoster() {
+    const names = importText.split(",").map((n) => n.trim()).filter(Boolean);
+    if (!names.length) {
+      setImportMsg("붙여넣은 코드가 비어있어요.");
+      return;
+    }
+    const existingNames = new Set(roster.map((m) => m.name));
+    const added = names.filter((n) => !existingNames.has(n)).map((n) => ({ id: uid(), name: n }));
+    if (!added.length) {
+      setImportMsg("이미 다 등록되어 있는 멤버예요.");
+      return;
+    }
+    persistRoster([...roster, ...added]);
+    setImportMsg(`${added.length}명 복원 완료!`);
+    setImportText("");
+    setTimeout(() => setImportMsg(""), 3000);
+  }
+
+  function addRosterMember() {
+    const name = nameInput.trim();
+    if (!name) {
+      setAddError("이름을 입력해주세요.");
+      return;
+    }
+    if (roster.some((m) => (m.name || "").normalize("NFC") === name.normalize("NFC"))) {
+      setAddError(`"${name}"은(는) 이미 등록되어 있어요.`);
+      return;
+    }
+    setAddError("");
+    const member = { id: uid(), name };
+    persistRoster([...roster, member]);
+    setMyRsvp(member.id, "in");
+    setNameInput("");
+  }
+
+  function removeRosterMember(id) {
+    persistRoster(roster.filter((m) => m.id !== id));
+    setPlayers((p) => p.filter((x) => x.id !== id));
+  }
+
+  function toggleAttend(member) {
+    const already = players.some((x) => x.id === member.id);
+    setMyRsvp(member.id, already ? "out" : "in");
+  }
+
+  function removePlayer(id) {
+    if (String(id).startsWith("guest_")) {
+      setPlayers((p) => p.filter((x) => x.id !== id));
+      db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.guestlist);
+        const data = snap.data() || {};
+        const items = (data.items || []).filter((g) => g.id !== id);
+        tx.set(REFS.guestlist, { items });
+      }).catch(() => {});
+      return;
+    }
+    setMyRsvp(id, "out");
+  }
+
+  const [guestName, setGuestName] = useState("");
+  const [guestlist, setGuestlist] = useState([]);
+
+  useEffect(() => {
+    const unsub = REFS.guestlist.onSnapshot((snap) => {
+      const data = snap.data();
+      setGuestlist(data && data.items ? data.items : []);
+    }, () => {});
+    return () => unsub();
+  }, []);
+
+  // 오늘 날짜로 등록된 게스트를 참석자 명단에 자동으로 채워요 — 이전엔 로컬 상태에만 있어서
+  // 다른 페이지로 이동했다 돌아오면(=새로고침) 사라지는 버그가 있었어요. 이제 Firestore에 저장돼서 안 사라져요.
+  useEffect(() => {
+    const todayGuests = guestlist.filter((g) => g.date === todayStr());
+    if (!todayGuests.length) return;
+    setPlayers((prev) => {
+      const existingIds = new Set(prev.map((p) => p.id));
+      const toAdd = todayGuests.filter((g) => !existingIds.has(g.id));
+      if (!toAdd.length) return prev;
+      return [...prev, ...toAdd.map((g) => ({ id: g.id, name: `${g.name} (게스트)`, gamesPlayed: 0, wins: 0, losses: 0 }))];
+    });
+  }, [guestlist]);
+
+  function addGuest() {
+    if (!adminOn) { tryAdminUnlock(); return; }
+    const trimmed = guestName.trim();
+    if (!trimmed) return;
+    const guestId = "guest_" + uid();
+    const entry = { id: guestId, name: trimmed, date: todayStr() };
+    setPlayers((p) => [...p, { id: guestId, name: `${trimmed} (게스트)`, gamesPlayed: 0, wins: 0, losses: 0 }]);
+    db.runTransaction(async (tx) => {
+      const snap = await tx.get(REFS.guestlist);
+      const data = snap.data() || {};
+      const items = [...(data.items || []), entry];
+      tx.set(REFS.guestlist, { items });
+    }).catch(() => {});
+    setGuestName("");
+  }
+
+  const [justShuffled, setJustShuffled] = useState(false);
+
+  // 현재 활성 매칭에 배정된(=아직 안 끝난) 선수 id 집합
+  const occupiedIds = new Set();
+  Object.values(courtMatches).forEach((m) => {
+    if (m && !m.done && m.date === todayStr()) {
+      [...m.teamA, ...m.teamB].forEach((p) => occupiedIds.add(p.id));
+      // 이미 다른 코트의 "다음 경기"로 예약된 사람도 대기 목록에서 빠져야 이중 배정이 안 돼요
+      if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => occupiedIds.add(p.id));
+    }
+  });
+
+  // 점수가 많이 나서 "곧 끝날 것 같은" 경기 — 다음 경기 미리 정할 때 대기자랑 같이 후보로 넣어요
+  // (그 경기 자체는 끝까지 계속하고, 끝나는 순간 바로 다음 경기로 넘어가는 거예요)
+  function isNearFinish(m) {
+    if (!m || m.done || m.date !== todayStr()) return false;
+    const a = Number(m.scoreA), b = Number(m.scoreB);
+    if (m.scoreA === "" || m.scoreB === "" || isNaN(a) || isNaN(b)) return false;
+    return Math.max(a, b) >= 15;
+  }
+
+  // 대기 중(체크인 했지만 지금 안 뛰고 있는) 선수들 — 오래 쉰 사람 우선, 쉬고 싶어요/제외된 사람은 빠짐
+  const waitingPlayers = players
+    .filter((p) => !occupiedIds.has(p.id) && !restWish[p.id] && !excluded.includes(p.id))
+    .sort((a, b) => {
+      const wa = waitStart[a.id] || 0;
+      const wb = waitStart[b.id] || 0;
+      if (wa !== wb) return wa - wb; // 대기 시작이 이를수록(오래 쉬었을수록) 우선
+      return todayGamesPlayed(a.id) - todayGamesPlayed(b.id) || Math.random() - 0.5;
+    });
+
+  // 대기 인원 + "곧 끝날 것 같은" 경기 선수 수를 합친 것 — 다음 경기 미리 정하기 버튼을 보여줄지 판단할 때 써요
+  const nearFinishPlayerIds = new Set();
+  Object.values(courtMatches).forEach((m) => {
+    if (isNearFinish(m)) [...m.teamA, ...m.teamB].forEach((p) => nearFinishPlayerIds.add(p.id));
+  });
+  const extendedPoolCount = waitingPlayers.length + [...nearFinishPlayerIds].filter((id) => !waitingPlayers.some((w) => w.id === id)).length;
+
+  const matchCtx = { hist, skillOf, mode: matchMode, todayPairCount, isFirstTimer, isKindOrStrong };
+
+  // 나 지금 뭐 하고 있는지 — 코트 하나하나 뒤질 필요 없이 한눈에 보여주기 위한 계산이에요.
+  const myStatus = (() => {
+    if (!myId) return null;
+    for (const [courtNum, m] of Object.entries(courtMatches)) {
+      if (!m || m.done || m.date !== todayStr()) continue;
+      const inCurrent = [...m.teamA, ...m.teamB].some((p) => p.id === myId);
+      if (inCurrent) {
+        const teammate = [...m.teamA, ...m.teamB].find((p) => p.id !== myId && (m.teamA.some((x) => x.id === myId) ? m.teamA.some((x) => x.id === p.id) : m.teamB.some((x) => x.id === p.id)));
+        return { type: "playing", court: courtNum, teammate: teammate ? teammate.name : "" };
+      }
+      if (m.next) {
+        const inNext = [...m.next.teamA, ...m.next.teamB].some((p) => p.id === myId);
+        if (inNext) {
+          const nextTeammate = [...m.next.teamA, ...m.next.teamB].find((p) => p.id !== myId && (m.next.teamA.some((x) => x.id === myId) ? m.next.teamA.some((x) => x.id === p.id) : m.next.teamB.some((x) => x.id === p.id)));
+          const nextOpponents = (m.next.teamA.some((x) => x.id === myId) ? m.next.teamB : m.next.teamA).map((p) => p.name);
+          return { type: "queued", court: courtNum, teammate: nextTeammate ? nextTeammate.name : "", opponents: nextOpponents };
+        }
+      }
+    }
+    const idx = waitingPlayers.findIndex((p) => p.id === myId);
+    if (idx >= 0) return { type: "waiting", position: idx + 1, soon: idx < 4 };
+    if (players.some((p) => p.id === myId)) return { type: "resting" };
+    return { type: "notCheckedIn" };
+  })();
+
+  // 실력전 모드: 대기 중인 사람을 실력순으로 줄세운 뒤, 4명씩 블록으로 나눠서 코트를 배정해요.
+  // 블록 경계는 매번 한 칸씩 밀려서(오프셋 회전) 매번 같은 조합만 반복되지 않게 해요.
+  // (예: 이번엔 1-4위/5-8위, 다음엔 2-5위/6-9위 ... 이렇게 밀리다 보면 1위와 8위가 한 그룹이 될 수도 있는데,
+  //  그때도 팀은 실력 차가 가장 적은 조합으로 갈라서 항상 공평하게 만들어요.)
+  function pickFourForCourt() {
+    if (matchMode !== "skill") return waitingPlayers.slice(0, 4);
+    const byRank = [...waitingPlayers].sort((a, b) => skillOf(b.id) - skillOf(a.id));
+    const n = byRank.length;
+    if (n < 4) return byRank;
+    const start = skillRankOffset % n;
+    // start 위치부터 4명(부족하면 앞에서부터 이어서) 뽑아요
+    const four = [];
+    for (let i = 0; i < 4; i++) four.push(byRank[(start + i) % n]);
+    return four;
+  }
+
+  // 회원용 랜덤 매칭 — 관리자 없이도 아무나 누를 수 있어요. 지금 안 뛰고 있는 사람 중에서만 완전 무작위로 4명을 뽑아요.
+  // 여러 명이 동시에 눌러도 한 코트에 경기가 중복 생성되지 않도록 트랜잭션으로 안전하게 처리해요.
+  const [randomBusy, setRandomBusy] = useState(null);
+  const [editingCourt, setEditingCourt] = useState(null); // 진행 중인 경기에서 잘못 들어간 선수를 바꿀 때 사용
+  const [expandedTools, setExpandedTools] = useState({}); // 코트별로 "더보기" 도구 모음이 펼쳐져 있는지
+
+  // 진행 중인 경기에서 특정 선수 한 명만 다른 사람으로 바꿔요 (점수는 그대로 유지) — 잘못 배정됐을 때 고치는 용도예요.
+  function swapPlayerInMatch(courtNum, oldPlayerId, newPlayerId) {
+    if (!adminOn) return;
+    const m = courtMatches[courtNum];
+    if (!m) return;
+    const newPlayer = players.find((p) => p.id === newPlayerId);
+    if (!newPlayer) return;
+    const already = [...m.teamA, ...m.teamB].some((p) => p.id === newPlayerId);
+    if (already) { appAlert("이미 이 경기에 들어가 있는 선수예요."); return; }
+    const swap = (team) => team.map((p) => (p.id === oldPlayerId ? { id: newPlayer.id, name: newPlayer.name } : p));
+    const updated = { ...m, teamA: swap(m.teamA), teamB: swap(m.teamB) };
+    persistCourtMatches(courtNum, updated);
+    setEditingCourt(null);
+  }
+
+  // 대기자가 없어도 고칠 수 있게 — 다른 코트에서 뛰고 있는 사람이랑 자리를 맞바꿔요 (두 코트 다 한 번에, 안전하게).
+  async function swapPlayerAcrossCourts(courtA, playerAId, courtB, playerBId) {
+    if (!adminOn) return;
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const matchA = current[courtA];
+        const matchB = current[courtB];
+        if (!matchA || !matchB) return;
+        const playerA = [...matchA.teamA, ...matchA.teamB].find((p) => p.id === playerAId);
+        const playerB = [...matchB.teamA, ...matchB.teamB].find((p) => p.id === playerBId);
+        if (!playerA || !playerB) return;
+        const swapIn = (team, oldId, newP) => team.map((p) => (p.id === oldId ? { id: newP.id, name: newP.name } : p));
+        const newMatchA = { ...matchA, teamA: swapIn(matchA.teamA, playerAId, playerB), teamB: swapIn(matchA.teamB, playerAId, playerB) };
+        const newMatchB = { ...matchB, teamA: swapIn(matchB.teamA, playerBId, playerA), teamB: swapIn(matchB.teamB, playerBId, playerA) };
+        const next = { ...current, [courtA]: newMatchA, [courtB]: newMatchB };
+        tx.set(REFS.courtmatches, { data: next });
+      });
+      setEditingCourt(null);
+    } catch (e) {
+      appAlert("자리 교환에 실패했어요. 다시 시도해주세요.");
+    }
+  }
+
+  async function startRandomMatchAsMember(courtNum) {
+    if (!myId) { appAlert("먼저 홈에서 이름으로 입장해주세요."); return; }
+    if (meetingEndedToday) { appAlert("오늘 모임이 이미 종료됐어요."); return; }
+    if (lockedCourts.includes(courtNum)) { appAlert("이 코트는 잠겨있어요."); return; }
+    if (randomBusy) return; // 중복 클릭 방지
+    setRandomBusy(courtNum);
+    try {
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const existing = current[courtNum];
+        if (existing && !existing.done && existing.date === todayStr()) {
+          return { ok: false, reason: "occupied" };
+        }
+        // 트랜잭션 안에서 "지금 진짜로 안 뛰고 있는 사람"을 다시 계산해요 (최신 데이터 기준으로, 중복 배정 방지)
+        const occupied = new Set();
+        Object.values(current).forEach((m) => {
+          if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id));
+        });
+        const pool = waitingPlayers.filter((p) => !occupied.has(p.id));
+        if (pool.length < 4) {
+          return { ok: false, reason: "notEnough" };
+        }
+        // 진짜 무작위로 4명을 뽑아요 (오래 기다린 순서 안 따짐) — "랜덤 매칭"이니까요.
+        // 팀을 나눌 때만 최근 파트너/상대 겹침을 피하는 쪽으로 골라요 — 완전 무작위로 나누면
+        // 사람이 적을 때 자꾸 같은 조합이 반복될 수 있어서요.
+        const four = [...pool].sort(() => Math.random() - 0.5).slice(0, 4);
+        const { a, b } = splitScore(four, matchCtx);
+        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+        const next = { ...current, [courtNum]: match };
+        tx.set(REFS.courtmatches, { data: next });
+        return { ok: true };
+      });
+      if (result && result.ok === false) {
+        if (result.reason === "occupied") appAlert("이미 다른 사람이 이 코트에 매칭을 만들었어요. 최신 상태로 화면이 갱신됐어요.");
+        else appAlert("대기 중인 인원이 4명 미만이에요.");
+      } else {
+        setJustShuffled(true);
+        setTimeout(() => setJustShuffled(false), 500);
+      }
+    } catch (e) {
+      appAlert("매칭 생성에 실패했어요. 다시 시도해주세요.");
+    } finally {
+      setRandomBusy(null);
+    }
+  }
+
+  // 지금 경기가 진행 중이어도, 그 코트의 "다음 경기"를 미리 정해둘 수 있어요.
+  // 현재 경기가 끝나는 순간(경기 종료) 자동으로 이 미리 정한 매칭이 바로 시작돼요 — 매번 기다렸다가 다시 매칭할 필요 없이요.
+  const [queueBusy, setQueueBusy] = useState(null);
+  async function queueNextMatch(courtNum) {
+    if (!myId) { appAlert("먼저 홈에서 이름으로 입장해주세요."); return; }
+    if (queueBusy) return;
+    setQueueBusy(courtNum);
+    try {
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const existing = current[courtNum];
+        if (!existing || existing.done || existing.date !== todayStr()) {
+          return { ok: false, reason: "notPlaying" };
+        }
+        if (existing.next) {
+          return { ok: false, reason: "alreadyQueued" };
+        }
+        // 지금 이 순간 진짜로 안 뛰고 있는 사람 + "곧 끝날 것 같은"(점수 15점 이상) 경기의 선수들도 후보로 합쳐요.
+        // (다른 코트 진행 중이거나, 이미 다른 코트의 "다음 경기"로 예약된 사람은 제외)
+        const occupied = new Set();
+        const nearFinishCandidates = [];
+        Object.values(current).forEach((m) => {
+          if (m && !m.done && m.date === todayStr()) {
+            [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id));
+            if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => occupied.add(p.id));
+            const sA = Number(m.scoreA), sB = Number(m.scoreB);
+            if (m.scoreA !== "" && m.scoreB !== "" && !isNaN(sA) && !isNaN(sB) && Math.max(sA, sB) >= 15) {
+              nearFinishCandidates.push(...m.teamA, ...m.teamB);
+            }
+          }
+        });
+        const waitingPool = waitingPlayers.filter((p) => !occupied.has(p.id));
+        const nearFinishPool = nearFinishCandidates.filter((p) => !occupied.has(p.id) && !waitingPool.some((w) => w.id === p.id));
+        const pool = [...waitingPool, ...nearFinishPool];
+        if (pool.length < 4) {
+          return { ok: false, reason: "notEnough" };
+        }
+        const four = [...pool].sort(() => Math.random() - 0.5).slice(0, 4);
+        const { a, b } = splitScore(four, matchCtx);
+        const queued = { teamA: a, teamB: b };
+        const nextData = { ...current, [courtNum]: { ...existing, next: queued } };
+        tx.set(REFS.courtmatches, { data: nextData });
+        return { ok: true };
+      });
+      if (result && result.ok === false) {
+        if (result.reason === "notEnough") appAlert("대기 중인 인원이 4명 미만이에요.");
+        else if (result.reason === "alreadyQueued") appAlert("이미 다음 경기가 정해져 있어요.");
+      }
+    } catch (e) {
+      appAlert("다음 경기 예약에 실패했어요. 다시 시도해주세요.");
+    } finally {
+      setQueueBusy(null);
+    }
+  }
+
+  async function cancelQueuedNext(courtNum) {
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const existing = current[courtNum];
+        if (!existing || !existing.next) return;
+        const { next, ...rest } = existing;
+        tx.set(REFS.courtmatches, { data: { ...current, [courtNum]: rest } });
+      });
+    } catch (e) {}
+  }
+
+  // 대기 인원이 4명 차면, 빈 코트가 있을 때 아무도 안 눌러도 자동으로 매칭을 시작해요 (관리자가 끌 수 있어요).
+  // 여러 사람이 동시에 이 화면을 보고 있어도, startRandomMatchAsMember 자체가 트랜잭션이라 중복 생성은 안 돼요.
+  const autoStartInFlight = useRef(false);
+  useEffect(() => {
+    if (!autoStart || !myId || meetingEndedToday || autoStartInFlight.current) return;
+    if (waitingPlayers.length < 4) return;
+    const freeCourts = Array.from({ length: numCourts }, (_, i) => i + 1).filter((n) => {
+      if (lockedCourts.includes(n)) return false;
+      const m = courtMatches[n];
+      return !m || m.done || m.date !== todayStr();
+    });
+    if (freeCourts.length === 0) return;
+    // 두세 코트가 한꺼번에 비어도 순서대로 다 채워요 — 인원이 되는 만큼 이어서 매칭해요.
+    autoStartInFlight.current = true;
+    (async () => {
+      for (const courtNum of freeCourts) {
+        await startRandomMatchAsMember(courtNum);
+      }
+    })().finally(() => {
+      setTimeout(() => { autoStartInFlight.current = false; }, 800);
+    });
+  }, [autoStart, waitingPlayers.length, courtMatches, numCourts, lockedCourts, meetingEndedToday, myId]);
+
+  function startMatchOnCourt(courtNum) {
+    if (!adminOn) {
+      tryAdminUnlock();
+      return;
+    }
+    if (meetingEndedToday) {
+      appAlert("오늘 모임이 이미 종료됐어요. 다시 시작하려면 먼저 '모임 다시 열기'를 눌러주세요.");
+      return;
+    }
+    if (lockedCourts.includes(courtNum)) {
+      appAlert("이 코트는 잠겨있어요. 잠금을 풀고 다시 시도해주세요.");
+      return;
+    }
+    if (waitingPlayers.length < 4) {
+      appAlert("대기 중인 인원이 4명 미만이에요. 체크인/참석자를 확인해주세요.");
+      return;
+    }
+    const four = pickFourForCourt();
+    const { a, b } = splitScore(four, matchCtx);
+    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+    persistCourtMatches(courtNum, match);
+    if (matchMode === "skill") persistMatchSettings({ skillRankOffset: skillRankOffset + 1 });
+    setMatchSeq((n) => n + 1);
+    setTab("match");
+    setJustShuffled(true);
+    setTimeout(() => setJustShuffled(false), 500);
+  }
+
+  // ---- 관리자가 직접 4명 골라서 코트에 배정하기 (+ 특정 두 명을 같은 팀으로 고정) ----
+  const [manualCourt, setManualCourt] = useState(null);
+  const [manualSelected, setManualSelected] = useState([]);
+  const [pinnedPair, setPinnedPair] = useState([]);
+
+  function toggleManualPick(id) {
+    setManualSelected((sel) =>
+      sel.includes(id) ? sel.filter((x) => x !== id) : sel.length < 4 ? [...sel, id] : sel
+    );
+    setPinnedPair((p) => p.filter((x) => x !== id)); // 선택 해제되면 고정도 같이 풀림
+  }
+
+  function togglePin(id) {
+    setPinnedPair((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length < 2 ? [...p, id] : p));
+  }
+
+  function openManualPick(courtNum) {
+    if (!adminOn) {
+      tryAdminUnlock();
+      return;
+    }
+    setManualCourt(courtNum);
+    setManualSelected([]);
+    setPinnedPair([]);
+  }
+
+  function cancelManualPick() {
+    setManualCourt(null);
+    setManualSelected([]);
+    setPinnedPair([]);
+  }
+
+  function startCourtWithFour(courtNum, four) {
+    let a, b;
+    const pinnedInFour = pinnedPair.filter((id) => four.some((p) => p.id === id));
+    if (pinnedInFour.length === 2) {
+      // 고정된 두 명을 한 팀으로 묶고, 나머지 둘이 상대 팀
+      a = four.filter((p) => pinnedInFour.includes(p.id));
+      b = four.filter((p) => !pinnedInFour.includes(p.id));
+    } else {
+      ({ a, b } = splitScore(four, matchCtx));
+    }
+    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+    persistCourtMatches(courtNum, match);
+    setMatchSeq((n) => n + 1);
+    setManualCourt(null);
+    setManualSelected([]);
+    setPinnedPair([]);
+    setTab("match");
+    setJustShuffled(true);
+    setTimeout(() => setJustShuffled(false), 500);
+  }
+
+  function confirmManualStart(courtNum) {
+    if (manualSelected.length !== 4) return;
+    const four = players.filter((p) => manualSelected.includes(p.id));
+    startCourtWithFour(courtNum, four);
+  }
+
+  // 지정한 몇 명만 고르고, 나머지는 대기열에서 무작위로 채워서 바로 시작
+  function autoFillAndStart(courtNum) {
+    if (manualSelected.length < 1 || manualSelected.length >= 4) return;
+    const chosen = players.filter((p) => manualSelected.includes(p.id));
+    const restPool = waitingPlayers.filter((p) => !manualSelected.includes(p.id));
+    const shuffled = [...restPool].sort(() => Math.random() - 0.5);
+    const need = 4 - chosen.length;
+    if (shuffled.length < need) {
+      appAlert(`대기 인원이 부족해요. (${need}명 더 필요해요)`);
+      return;
+    }
+    const four = [...chosen, ...shuffled.slice(0, need)];
+    startCourtWithFour(courtNum, four);
+  }
+
+
+  // 관리자: 이미 시작한(아직 안 끝난) 경기도 팀을 다시 섞어요
+  function reshuffleCourt(courtNum) {
+    if (!adminOn) { tryAdminUnlock(); return; }
+    const m = courtMatches[courtNum];
+    if (!m) return;
+    const four = [...m.teamA, ...m.teamB];
+    const { a, b } = splitScore(four, matchCtx);
+    const match = { ...m, teamA: a, teamB: b, scoreA: "", scoreB: "" };
+    persistCourtMatches(courtNum, match);
+  }
+
+  // 점수는 타이핑할 때마다 서버 왕복(트랜잭션)을 기다리면 버벅이니까, 화면은 즉시 업데이트하고
+  // 서버 저장은 타이핑이 잠깐 멈췄을 때 한 번만 보내요 (디바운스).
+  const scoreDebounceRef = useRef({});
+  const dirtyScoreFieldsRef = useRef({}); // 아직 서버에 저장 안 된(타이핑 중인) 점수 칸 표시 — 실시간 동기화가 이 값을 안 덮어쓰게 해줘요
+  function updateScore(courtNum, side, value) {
+    if (!/^\d{0,2}$/.test(value)) return;
+    setCourtMatches((prev) => {
+      const m = prev[courtNum];
+      if (!m) return prev;
+      return { ...prev, [courtNum]: { ...m, [side]: value } };
+    });
+    const key = `${courtNum}-${side}`;
+    const dirtyKey = `${courtNum}|${side}`;
+    dirtyScoreFieldsRef.current[dirtyKey] = true;
+    clearTimeout(scoreDebounceRef.current[key]);
+    scoreDebounceRef.current[key] = setTimeout(() => {
+      persistCourtMatches(courtNum, (prevRemote) => (prevRemote ? { ...prevRemote, [side]: value } : prevRemote))
+        .finally(() => { delete dirtyScoreFieldsRef.current[dirtyKey]; });
+    }, 350);
+  }
+
+  function finishMatch(courtNum) {
+    const m = courtMatches[courtNum];
+    if (!m || m.scoreA === "" || m.scoreB === "" || m.scoreA === m.scoreB) return;
+    const aWin = Number(m.scoreA) > Number(m.scoreB);
+
+    setPlayers((ps) =>
+      ps.map((p) => {
+        const inA = m.teamA.some((x) => x.id === p.id);
+        const inB = m.teamB.some((x) => x.id === p.id);
+        if (!inA && !inB) return p;
+        const won = (inA && aWin) || (inB && !aWin);
+        return {
+          ...p,
+          gamesPlayed: p.gamesPlayed + 1,
+          wins: p.wins + (won ? 1 : 0),
+          losses: p.losses + (won ? 0 : 1),
+        };
+      })
+    );
+
+    setHist((h) => {
+      const nh = { partner: { ...h.partner }, opponent: { ...h.opponent } };
+      bump(nh.partner, pKey(m.teamA[0].id, m.teamA[1].id));
+      bump(nh.partner, pKey(m.teamB[0].id, m.teamB[1].id));
+      m.teamA.forEach((a) => m.teamB.forEach((b) => bump(nh.opponent, pKey(a.id, b.id))));
+      return nh;
+    });
+
+    const finished = { ...m, done: true };
+    delete finished.next;
+    setHistory((hArr) => [{ ...finished, round: matchSeq }, ...hArr]);
+    logMatchResult({
+      round: matchSeq,
+      court: m.court,
+      teamA: m.teamA.map((p) => ({ id: p.id, name: p.name })),
+      teamB: m.teamB.map((p) => ({ id: p.id, name: p.name })),
+      scoreA: m.scoreA,
+      scoreB: m.scoreB,
+    });
+
+    // 미리 정해둔 "다음 경기"가 있으면, 끝나자마자 바로 그 매칭으로 시작해요. 없으면 예전처럼 빈 코트로 남아요.
+    const nextCourtState = m.next
+      ? { id: uid(), court: courtNum, teamA: m.next.teamA, teamB: m.next.teamB, scoreA: "", scoreB: "", done: false, date: todayStr() }
+      : finished;
+    persistCourtMatches(courtNum, nextCourtState);
+    markWaiting([...m.teamA, ...m.teamB].map((p) => p.id)); // 방금 끝난 사람들은 지금부터 대기 시작
+  }
+
+
+  return (
+    <RequireLogin myId={myId}>
+    <div className="min-h-screen bg-white text-stone-900 pb-24 font-sans">
+      <TopHeader title="🎲 랜덤매칭" subtitle="오늘 코트 매칭을 만들어봐요" />
+
+      <section className="px-5 max-w-2xl mx-auto mb-4 flex items-center justify-between">
+        <div className="flex gap-3 text-xs text-stone-500">
+          <span>참석 <b className="text-stone-800">{players.length}</b>명</span>
+          <span>·</span>
+          <span>코트 <b className="text-stone-800">{numCourts}</b>면</span>
+          {Object.values(courtMatches).some((m) => m && !m.done) && (
+            <>
+              <span>·</span>
+              <span><b className="text-stone-800">{Object.values(courtMatches).filter((m) => m && !m.done).length}</b>경기 진행중</span>
+            </>
+          )}
+        </div>
+        <button
+          onClick={adminOn ? adminLock : tryAdminUnlock}
+          className={`text-[11px] px-3 py-1.5 rounded-full border shrink-0 ${
+            adminOn ? "text-white border-transparent" : "text-stone-400 border-stone-200"
+          }`}
+          style={adminOn ? { backgroundColor: "#4CAF50" } : {}}
+        >
+          {adminOn ? "🔓 관리자" : "🔒 관리자"}
+        </button>
+      </section>
+
+      {/* top segmented sub-tabs (page-internal navigation) */}
+      <section className="px-5 max-w-2xl mx-auto mb-5">
+        <div className="flex gap-1.5 bg-stone-50 rounded-2xl p-1.5 border border-stone-100">
+          {[
+            { key: "match", label: "매칭", emoji: "🔀" },
+            { key: "record", label: "기록", emoji: "🏆" },
+            ...(adminOn ? [{ key: "players", label: "참석자 관리", emoji: "👥" }] : []),
+          ].map(({ key, label, emoji }) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`flex-1 py-2 rounded-xl text-xs font-semibold tap-scale flex items-center justify-center gap-1 transition ${
+                tab === key ? "text-white shadow-sm" : "text-stone-400"
+              }`}
+              style={tab === key ? { backgroundColor: "#4CAF50" } : {}}
+            >
+              <span>{emoji}</span>{label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {tab === "players" && (
+        <section className="px-5 mt-5 space-y-5">
+          {adminOn ? (
+          <div className="bc-card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold flex items-center gap-1">👥 고정 멤버 (관리자용 직접 체크)</p>
+              <button
+                onClick={() => setManageMode((v) => !v)}
+                className="text-xs text-stone-400 underline underline-offset-2"
+              >
+                {manageMode ? "완료" : "명단 관리"}
+              </button>
+            </div>
+            <p className="text-[11px] text-stone-400 mb-2">일반 회원은 더보기 → 일정에서 참석 체크하면 자동으로 반영돼요. 여긴 관리자가 앱 못 쓰는 분을 대신 체크해줄 때만 써요.</p>
+
+            {!rosterReady ? (
+              <p className="text-xs text-stone-400 py-2">불러오는 중...</p>
+            ) : roster.length === 0 ? (
+              <p className="text-xs text-stone-400 py-2">등록된 멤버가 없어요. 아래에서 이름을 추가해보세요.</p>
+            ) : (
+              <>
+                <p className="text-xs text-stone-400 mb-2">
+                  {manageMode ? "탭하면 명단에서 완전히 삭제돼요." : "탭해서 오늘 참석을 체크하세요."}
+                </p>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {roster.map((m) => {
+                    const attending = players.some((p) => p.id === m.id);
+                    return manageMode ? (
+                      <button
+                        key={m.id}
+                        onClick={() => removeRosterMember(m.id)}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-full text-sm bg-red-50 text-red-500 border border-red-200"
+                      >
+                        {m.name} ✕
+                      </button>
+                    ) : (
+                      <button
+                        key={m.id}
+                        onClick={() => toggleAttend(m)}
+                        className={`px-3 py-1.5 rounded-full text-sm border transition ${
+                          attending
+                            ? "bg-[#4CAF50] text-white border-[#4CAF50]"
+                            : "bg-stone-50 text-stone-500 border-stone-200"
+                        }`}
+                      >
+                        {m.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                value={nameInput}
+                onChange={(e) => {
+                  setNameInput(e.target.value);
+                  if (addError) setAddError("");
+                }}
+                onKeyDown={(e) => e.key === "Enter" && addRosterMember()}
+                placeholder="새 멤버 이름"
+                className="flex-1 rounded-xl border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#4CAF50]"
+              />
+              <button
+                onClick={addRosterMember}
+                className="bg-[#4CAF50] text-white rounded-xl px-4 flex items-center gap-1 active:scale-95 transition"
+              >
+                + 등록
+              </button>
+            </div>
+            {addError && <p className="text-xs text-red-500 mt-1.5">{addError}</p>}
+            <p className="text-[11px] text-[#4CAF50] mt-2">🔄 이 명단은 이제 모두에게 실시간으로 공유돼요.</p>
+
+            <button
+              onClick={() => setShowBackup((v) => !v)}
+              className="text-xs text-[#4CAF50] underline underline-offset-2 mt-3"
+            >
+              {showBackup ? "백업/복원 닫기" : "명단 백업/복원하기"}
+            </button>
+
+            {showBackup && (
+              <div className="mt-3 space-y-3 bg-stone-50 rounded-xl p-3 border border-stone-200">
+                <div>
+                  <p className="text-xs font-semibold text-stone-500 mb-1">지금 명단 백업하기</p>
+                  <input
+                    ref={backupInputRef}
+                    readOnly
+                    value={backupCode || "등록된 멤버가 없어요"}
+                    onClick={(e) => e.target.select()}
+                    onFocus={(e) => e.target.select()}
+                    className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-xs scorefont"
+                  />
+                  <button
+                    onClick={copyBackup}
+                    className="mt-2 w-full bg-[#4CAF50] text-white rounded-lg py-2 text-xs font-semibold"
+                  >
+                    코드 복사하기
+                  </button>
+                  {copyMsg && <p className="text-xs text-[#4CAF50] mt-1">{copyMsg}</p>}
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-stone-500 mb-1">코드로 복원하기</p>
+                  <textarea
+                    value={importText}
+                    onChange={(e) => setImportText(e.target.value)}
+                    placeholder="붙여넣기: 리리,밍크크,철수"
+                    className="w-full rounded-lg border border-stone-300 px-3 py-2 text-xs h-16 focus:outline-none focus:ring-2 focus:ring-[#4CAF50]"
+                  />
+                  <button
+                    onClick={importRoster}
+                    className="mt-2 w-full bg-stone-800 text-white rounded-lg py-2 text-xs font-semibold"
+                  >
+                    복원하기
+                  </button>
+                  {importMsg && <p className="text-xs text-[#4CAF50] mt-1">{importMsg}</p>}
+                </div>
+              </div>
+            )}
+          </div>
+          ) : (
+            <div className="bc-card p-4 text-center">
+              <p className="text-sm text-stone-500">✅ 참석 체크는 <b>더보기 → 일정</b>에서 해주세요.</p>
+              <p className="text-[11px] text-stone-400 mt-1">여기서는 오늘 참석자와 매칭 현황만 볼 수 있어요.</p>
+            </div>
+          )}
+
+          {adminOn ? (
+            <div className="bc-card p-4">
+              <p className="text-sm font-semibold mb-2">사용할 코트 수</p>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => persistMatchSettings({ numCourts: Math.max(1, numCourts - 1) })}
+                  className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center"
+                >
+                  −
+                </button>
+                <span className="scorefont text-xl w-8 text-center">{numCourts}</span>
+                <button
+                  onClick={() => persistMatchSettings({ numCourts: numCourts + 1 })}
+                  className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center"
+                >
+                  +
+                </button>
+                <span className="text-xs text-stone-400">(최대 {maxCourts || 0}면 · 4명당 1코트)</span>
+              </div>
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-stone-100">
+                <div>
+                  <p className="text-xs font-semibold text-stone-700">🤖 자동 매칭 시작</p>
+                  <p className="text-[11px] text-stone-400">대기 4명 차고 빈 코트 있으면 자동으로 시작해요</p>
+                </div>
+                <button
+                  onClick={() => persistMatchSettings({ autoStart: !autoStart })}
+                  className="w-11 h-6 rounded-full relative tap-scale shrink-0"
+                  style={{ backgroundColor: autoStart ? "#4CAF50" : "#e5e5e5" }}
+                >
+                  <span
+                    className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all"
+                    style={{ left: autoStart ? "22px" : "2px" }}
+                  />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-stone-400 text-center">코트 {numCourts}면 운영 중 · {MATCH_MODES.find((m) => m.key === matchMode)?.label || "⚖️ 균형"} 모드</p>
+          )}
+
+          {adminOn && (
+          <div className="bc-card p-4">
+            <div className="flex items-center justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">🏸 매칭 방식</p>
+                <p className="text-[11px] text-stone-400 mt-0.5 truncate">{MATCH_MODES.find((m) => m.key === matchMode)?.desc}</p>
+              </div>
+              <select
+                value={matchMode}
+                onChange={(e) => persistMatchSettings({ mode: e.target.value })}
+                className="text-sm border border-stone-200 rounded-lg px-2 py-1.5 shrink-0 ml-2"
+              >
+                {MATCH_MODES.map((opt) => (
+                  <option key={opt.key} value={opt.key}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          )}
+
+          <div>
+            <p className="text-sm font-semibold mb-2">오늘 참석자 ({players.length}명)</p>
+            <p className="text-[11px] text-[#4CAF50] mb-1">✅ 더보기 → 일정에서 참석 체크하면 자동으로 여기 반영돼요.</p>
+            <p className="text-[11px] text-stone-400 mb-2">🔥상위 · ➖중위 · 🌱하위 등급으로 나눠서, 매칭 생성할 때 자동으로 실력 밸런스를 맞춰요. (최소 {MIN_GAMES_FOR_TIER}경기 이상부터 등급 계산돼요)</p>
+            {adminOn && (
+              <div className="flex gap-2 mb-3">
+                <input
+                  value={guestName}
+                  onChange={(e) => setGuestName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addGuest()}
+                  placeholder="가끔 오는 게스트 이름"
+                  className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm"
+                />
+                <button onClick={addGuest} className="text-white rounded-lg px-4 text-sm font-semibold" style={{ backgroundColor: "#4CAF50" }}>
+                  게스트 추가
+                </button>
+              </div>
+            )}
+            {players.length === 0 ? (
+              <p className="text-sm text-stone-400 bg-white rounded-2xl p-5 text-center border border-dashed border-stone-300">
+                아직 참석자가 없어요. 일정에서 참석 체크를 하면 여기 자동으로 나타나요.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {players.map((p) => {
+                  const stats = lifetimeStatsFor(p.id);
+                  const tier = tierMap[p.id];
+                  const badge = tierBadge[tier];
+                  const rosterMember = roster.find((r) => r.id === p.id);
+                  const showLevel = rosterMember && rosterMember.level;
+                  const isExcluded = excluded.includes(p.id);
+                  return (
+                  <li
+                    key={p.id}
+                    className={`bg-white rounded-xl px-4 py-3 flex items-center justify-between border ${isExcluded ? "border-red-200 opacity-60" : "border-stone-200"}`}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-stone-800">{p.name}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                        {isFirstTimer(p.id) && <MiniTag>🌱 첫참석</MiniTag>}
+                        {badge && <span className={`text-[10px] font-medium ${badge.color}`}>{badge.emoji} {tier}</span>}
+                        {showLevel && <MiniTag>{rosterMember.level}</MiniTag>}
+                        {isExcluded && <span className="text-[10px] text-red-400">매칭 제외됨</span>}
+                      </div>
+                      <p className="text-xs text-stone-400 scorefont mt-1">
+                        오늘 {todayGamesPlayed(p.id)}경기 · 통산 {stats.wins}승 {stats.losses}패
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {adminOn && (
+                        <button onClick={() => toggleExcluded(p.id)} className="text-[11px] text-stone-400 underline underline-offset-2">
+                          {isExcluded ? "제외 해제" : "매칭 제외"}
+                        </button>
+                      )}
+                      <button onClick={() => removePlayer(p.id)} className="text-red-500">✕</button>
+                    </div>
+                  </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          <button
+            disabled={!canGenerate}
+            onClick={() => setTab("match")}
+            className={`w-full rounded-2xl py-3.5 flex items-center justify-center gap-2 font-semibold headfont uppercase tracking-wide ${
+              canGenerate ? "bg-[#4CAF50] text-white active:scale-[0.98]" : "bg-stone-200 text-stone-400"
+            } transition`}
+          >
+            🎲 매칭 탭으로 가서 코트별로 시작하기
+          </button>
+          {!canGenerate && (
+            <p className="text-xs text-center text-stone-400 -mt-2">최소 4명 이상 체크해야 매칭할 수 있어요.</p>
+          )}
+        </section>
+      )}
+
+
+      {tab === "match" && (
+        <section className="px-5 mt-5 space-y-4">
+          {myStatus && !meetingEndedToday && (
+            <div className="rounded-2xl p-4 flex items-center gap-3" style={{ backgroundColor: "#F0FBF1", border: "1px solid #D5EEDB" }}>
+              {myStatus.type === "playing" && (
+                <>
+                  <span className="text-2xl">🏸</span>
+                  <p className="text-sm text-stone-700"><b>코트 {myStatus.court}</b>에서 {myStatus.teammate ? <>{myStatus.teammate}님과 </> : ""}경기 중이에요!</p>
+                </>
+              )}
+              {myStatus.type === "queued" && (
+                <>
+                  <span className="text-2xl">🔜</span>
+                  <p className="text-sm text-stone-700">
+                    다음 경기로 <b>코트 {myStatus.court}</b>에 예약돼 있어요
+                    {myStatus.teammate && <>, <b>{myStatus.teammate}</b>님과 한 팀이에요</>}
+                    {myStatus.opponents && myStatus.opponents.length > 0 && <> (상대: {myStatus.opponents.join(", ")})</>}
+                  </p>
+                </>
+              )}
+              {myStatus.type === "waiting" && (
+                <>
+                  <span className="text-2xl">{myStatus.soon ? "⏱️" : "⏳"}</span>
+                  <p className="text-sm text-stone-700">
+                    현재 대기 <b>{myStatus.position}번째</b>
+                    {myStatus.soon ? " — 곧 코트가 배정될 거예요!" : "예요."}
+                  </p>
+                </>
+              )}
+              {myStatus.type === "resting" && (
+                <>
+                  <span className="text-2xl">☕</span>
+                  <p className="text-sm text-stone-700">쉬는 중으로 설정되어 있어요. 다시 뛰고 싶으면 참석자 관리에서 해제해주세요.</p>
+                </>
+              )}
+              {myStatus.type === "notCheckedIn" && (
+                <>
+                  <span className="text-2xl">🙋</span>
+                  <p className="text-sm text-stone-700">아직 오늘 참석 체크가 안 됐어요. 홈에서 참석 체크부터 해주세요!</p>
+                </>
+              )}
+            </div>
+          )}
+
+          {meetingEndedToday && (
+            <div className="rounded-2xl p-4 text-center" style={{ backgroundColor: "#FFFBEA", border: "1px solid #FFD54F" }}>
+              <p className="text-sm font-bold" style={{ color: "#B98900" }}>🏁 오늘 모임이 종료됐어요</p>
+              <p className="text-xs text-stone-500 mt-1">새 경기는 시작할 수 없어요.</p>
+              {adminOn && (
+                <button onClick={reopenTodayMeeting} className="block mx-auto mt-2 text-[11px] text-stone-400 underline underline-offset-2">
+                  모임 다시 열기
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-2xl p-4 text-white relative overflow-hidden" style={{ backgroundColor: "#4CAF50" }}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] uppercase tracking-widest text-white/80">🏸 오늘 운영</p>
+              {adminOn && !meetingEndedToday && (
+                <button onClick={endTodayMeeting} className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/20 tap-scale">
+                  🏁 오늘 모임 마치기
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[11px] text-white/70">오늘 참석</p>
+                <p className="headfont text-2xl">{players.length}<span className="text-sm font-normal">명</span></p>
+              </div>
+              <div>
+                <p className="text-[11px] text-white/70">추천 코트 수</p>
+                <p className="headfont text-2xl">{Math.max(1, Math.floor(players.length / 4)) || 0}<span className="text-sm font-normal">면</span></p>
+              </div>
+              <div>
+                <p className="text-[11px] text-white/70">현재 대기</p>
+                <p className="headfont text-2xl">{waitingPlayers.length}<span className="text-sm font-normal">명</span></p>
+              </div>
+              <div>
+                <p className="text-[11px] text-white/70">다음 추천</p>
+                <p className="text-sm font-semibold leading-snug">{waitingPlayers.slice(0, 4).map((p) => p.name).join(", ") || "-"}</p>
+              </div>
+            </div>
+            {(() => {
+              const eligibleCount = players.filter((p) => !shuttlecockToday.exempt || !shuttlecockToday.exempt[p.id]).length;
+              const submittedCount = players.filter((p) => shuttlecockToday.submitted && shuttlecockToday.submitted[p.id]).length;
+              const notSubmitted = eligibleCount - submittedCount;
+              if (eligibleCount === 0 || notSubmitted <= 0) return null;
+              return (
+                <a
+                  href="#shuttlecock-panel"
+                  className="mt-3 flex items-center justify-between rounded-xl px-3 py-2 text-xs"
+                  style={{ backgroundColor: "rgba(255,255,255,0.15)" }}
+                >
+                  <span>🏸 셔틀콕 아직 {notSubmitted}명 제출 안 함</span>
+                  <span className="underline">확인하기 ↓</span>
+                </a>
+              );
+            })()}
+          </div>
+
+          <div id="shuttlecock-panel"><ShuttlecockPanel players={players} myId={myId} adminOn={adminOn} /></div>
+
+          {adminOn && <OpsRecommendation waitingPlayers={waitingPlayers} players={players} matchhistory={matchhistory} matchMode={matchMode} isFirstTimer={isFirstTimer} roster={roster} />}
+
+          {waitingPlayers.length > 0 && (
+            <div className="bg-stone-100 rounded-2xl p-4 border border-stone-200">
+              <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">⏳ 대기 중 ({waitingPlayers.length}명)</p>
+              <div className="flex flex-wrap gap-2">
+                {waitingPlayers.map((p, i) => (
+                  <span
+                    key={p.id}
+                    className={`text-xs pl-1 pr-2.5 py-1 rounded-full flex items-center gap-1.5 ${i < 4 ? "text-white font-semibold" : "bg-white text-stone-500 border border-stone-200"}`}
+                    style={i < 4 ? { backgroundColor: "#4CAF50" } : {}}
+                  >
+                    <Avatar name={p.name} size={20} />
+                    {i < 4 ? "🔜 " : ""}{p.name}
+                  </span>
+                ))}
+              </div>
+              {waitingPlayers.length >= 4 && (
+                <p className="text-[11px] text-stone-400 mt-2">🔜 표시된 4명이 다음 코트가 열리면 우선 배정돼요.</p>
+              )}
+            </div>
+          )}
+
+          {Array.from({ length: numCourts }, (_, i) => i + 1).map((courtNum) => {
+            const raw = courtMatches[courtNum];
+            const m = raw && raw.date === todayStr() ? raw : null; // 오늘 날짜가 아닌(예전) 경기는 화면상 비어있는 코트로 취급해요
+            const isManualHere = manualCourt === courtNum;
+            return (
+              <div key={courtNum} className="rise-in bc-card overflow-hidden">
+                <div className="px-4 py-2.5 flex justify-between items-center" style={{ background: "linear-gradient(135deg, #52B858 0%, #3C9A45 100%)" }}>
+                  <span className="text-white text-[11px] font-bold uppercase tracking-[0.15em]">Court {courtNum} {lockedCourts.includes(courtNum) && "🔒"}</span>
+                  <div className="flex items-center gap-2">
+                    {m && m.done && <StatusPill tone="yellow">종료</StatusPill>}
+                    {m && !m.done && <StatusPill tone="green">경기중</StatusPill>}
+                    {!m && <StatusPill tone="gray">비어있음</StatusPill>}
+                    {adminOn && (
+                      <button onClick={() => toggleCourtLock(courtNum)} className="text-white/80 text-[10px] normal-case tracking-normal underline underline-offset-2">
+                        {lockedCourts.includes(courtNum) ? "잠금해제" : "잠그기"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {!m ? (
+                  <div className="p-5 text-center space-y-2">
+                    {meetingEndedToday ? (
+                      <p className="text-xs text-stone-400">🏁 오늘 모임이 종료됐어요.</p>
+                    ) : lockedCourts.includes(courtNum) ? (
+                      <p className="text-xs text-stone-400">🔒 이 코트는 잠겨있어요.</p>
+                    ) : !adminOn ? (
+                      <>
+                        <p className="text-xs text-stone-400">이 코트는 비어있어요.</p>
+                        {waitingPlayers.length < 4 && (
+                          <p className="text-xs font-medium" style={{ color: "#B98900" }}>
+                            ⚠️ {4 - waitingPlayers.length}명이 더 필요해요 (대기 {waitingPlayers.length}명 / 4명)
+                          </p>
+                        )}
+                        <button
+                          onClick={() => startRandomMatchAsMember(courtNum)}
+                          disabled={randomBusy === courtNum || waitingPlayers.length < 4}
+                          className="w-full rounded-xl py-3 font-semibold text-sm active:scale-[0.98] transition disabled:opacity-40 disabled:bg-stone-200 disabled:text-stone-400"
+                          style={waitingPlayers.length >= 4 ? { backgroundColor: "#FFD54F", color: "#5c4a00" } : {}}
+                        >
+                          {randomBusy === courtNum ? "생성 중..." : "🎲 랜덤 매칭으로 시작"}
+                        </button>
+                      </>
+                    ) : !isManualHere ? (
+                      <>
+                        {waitingPlayers.length < 4 ? (
+                          <p className="text-xs font-medium" style={{ color: "#B98900" }}>
+                            ⚠️ {4 - waitingPlayers.length}명이 부족해요. (대기 {waitingPlayers.length}명 / 4명 필요)
+                          </p>
+                        ) : (
+                          <p className="text-xs text-stone-400">이 코트는 비어있어요. 대기 중인 인원으로 바로 시작할 수 있어요.</p>
+                        )}
+                        <button
+                          onClick={() => startMatchOnCourt(courtNum)}
+                          disabled={waitingPlayers.length < 4}
+                          className="w-full rounded-xl py-3 font-semibold text-sm bg-[#4CAF50] text-white active:scale-[0.98] transition disabled:bg-stone-200 disabled:text-stone-400"
+                        >
+                          🔀 이 코트 경기 시작
+                        </button>
+                        <button
+                          onClick={() => openManualPick(courtNum)}
+                          className="w-full rounded-xl py-2 text-xs font-semibold border"
+                          style={{ borderColor: "#FFD54F", color: "#B98900" }}
+                        >
+                          ✋ 직접 4명 선택해서 시작
+                        </button>
+                      </>
+                    ) : (
+                      <ManualPicker
+                        waitingPlayers={waitingPlayers}
+                        selected={manualSelected}
+                        onToggle={toggleManualPick}
+                        onConfirm={() => confirmManualStart(courtNum)}
+                        onAutoFill={() => autoFillAndStart(courtNum)}
+                        onCancel={cancelManualPick}
+                        pinnedPair={pinnedPair}
+                        onTogglePin={togglePin}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center px-4 py-4 gap-2">
+                      <div className="flex flex-col items-end gap-1.5">
+                        <div className="flex items-center gap-2 justify-end">
+                          <p className="text-sm font-medium leading-tight">{m.teamA[0].name}</p>
+                          <Avatar name={m.teamA[0].name} size={30} />
+                        </div>
+                        <div className="flex items-center gap-2 justify-end">
+                          <p className="text-sm font-medium leading-tight">{m.teamA[1].name}</p>
+                          <Avatar name={m.teamA[1].name} size={30} />
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-px h-4 bg-stone-300" />
+                        <span className="text-[10px] text-stone-400">VS</span>
+                        <div className="w-px h-4 bg-stone-300" />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center gap-2">
+                          <Avatar name={m.teamB[0].name} size={30} />
+                          <p className="text-sm font-medium leading-tight">{m.teamB[0].name}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Avatar name={m.teamB[1].name} size={30} />
+                          <p className="text-sm font-medium leading-tight">{m.teamB[1].name}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-center gap-3 pb-4">
+                      <input
+                        disabled={m.done}
+                        value={m.scoreA}
+                        onChange={(e) => updateScore(courtNum, "scoreA", e.target.value)}
+                        inputMode="numeric"
+                        placeholder="0"
+                        className="scorefont w-14 h-12 text-center text-xl rounded-xl border border-stone-300 bg-stone-50 disabled:bg-stone-100 disabled:text-stone-400"
+                      />
+                      <span className="text-stone-400">:</span>
+                      <input
+                        disabled={m.done}
+                        value={m.scoreB}
+                        onChange={(e) => updateScore(courtNum, "scoreB", e.target.value)}
+                        inputMode="numeric"
+                        placeholder="0"
+                        className="scorefont w-14 h-12 text-center text-xl rounded-xl border border-stone-300 bg-stone-50 disabled:bg-stone-100 disabled:text-stone-400"
+                      />
+                    </div>
+                    {!m.done ? (
+                      <div className="px-4 pb-4 space-y-2">
+                        <button
+                          onClick={() => finishMatch(courtNum)}
+                          disabled={m.scoreA === "" || m.scoreB === "" || m.scoreA === m.scoreB}
+                          className="w-full py-2.5 text-sm font-semibold bg-[#FFD54F] text-[#5c4a00] disabled:bg-stone-200 disabled:text-stone-400 rounded-xl"
+                        >
+                          경기 종료
+                        </button>
+
+                        {/* 🔜 다음 경기 미리 정하기 — 지금 경기가 끝나길 기다리지 않고, 다음 경기 멤버를 미리 정해둘 수 있어요 */}
+                        {m.next ? (
+                          <div className="bg-stone-50 rounded-xl p-2.5">
+                            <p className="text-[11px] text-stone-400 mb-1">🔜 다음 경기 예약됨</p>
+                            <p className="text-xs text-stone-600">{m.next.teamA[0].name}·{m.next.teamA[1].name} <span className="text-stone-300">vs</span> {m.next.teamB[0].name}·{m.next.teamB[1].name}</p>
+                            {(() => {
+                              // 예약된 사람 중 "곧 끝날 경기"에서 아직 뛰고 있는 사람이 있으면, 그 경기(코트)가 끝나야 시작된다고 알려줘요
+                              const queuedIds = [...m.next.teamA, ...m.next.teamB].map((p) => p.id);
+                              const depCourt = Object.entries(courtMatches).find(([cn, cm]) =>
+                                Number(cn) !== courtNum && cm && !cm.done && [...cm.teamA, ...cm.teamB].some((p) => queuedIds.includes(p.id))
+                              );
+                              return depCourt ? (
+                                <p className="text-[11px] mt-1" style={{ color: "#B98900" }}>⏳ 코트 {depCourt[0]} 경기가 끝나야 시작돼요. 너무 오래 걸리면 예약을 취소하고 다시 정할 수 있어요.</p>
+                              ) : null;
+                            })()}
+                            {(adminOn || m.next.teamA.some((p) => p.id === myId) || m.next.teamB.some((p) => p.id === myId)) && (
+                              <button onClick={() => cancelQueuedNext(courtNum)} className="text-[11px] text-stone-400 underline underline-offset-2 mt-1">예약 취소</button>
+                            )}
+                          </div>
+                        ) : extendedPoolCount >= 4 && (
+                          <button
+                            onClick={() => queueNextMatch(courtNum)}
+                            disabled={queueBusy === courtNum}
+                            className="w-full rounded-xl py-2 text-xs font-semibold border disabled:opacity-60"
+                            style={{ borderColor: "#4CAF50", color: "#2E7D32" }}
+                          >
+                            {queueBusy === courtNum ? "정하는 중..." : "🔜 다음 경기 미리 정하기"}
+                          </button>
+                        )}
+
+                        {adminOn && (
+                          <div className="pt-1">
+                            <button
+                              onClick={() => setExpandedTools((t) => ({ ...t, [courtNum]: !t[courtNum] }))}
+                              className="w-full text-center text-[11px] text-stone-400 py-1"
+                            >
+                              {expandedTools[courtNum] ? "관리자 도구 접기 ▲" : "⚙️ 관리자 도구 더보기 ▼"}
+                            </button>
+                            {expandedTools[courtNum] && (
+                              <div className="space-y-2 mt-1">
+                                <button onClick={() => reshuffleCourt(courtNum)} className="w-full py-2 text-xs font-semibold border border-stone-200 text-stone-500 rounded-xl">
+                                  🔀 팀 다시 섞기
+                                </button>
+                                <button
+                                  onClick={() => setEditingCourt(editingCourt === courtNum ? null : courtNum)}
+                                  className="w-full py-2 text-xs font-semibold border border-stone-200 text-stone-500 rounded-xl"
+                                >
+                                  ✏️ 잘못 들어간 선수 바꾸기
+                                </button>
+                                {editingCourt === courtNum && (
+                                  <div className="bg-stone-50 rounded-xl p-2.5 space-y-1.5">
+                                    {[...m.teamA, ...m.teamB].map((p) => (
+                                      <div key={p.id} className="flex items-center gap-2">
+                                        <span className="text-xs text-stone-600 w-16 truncate shrink-0">{p.name}</span>
+                                        <span className="text-stone-300 text-xs">→</span>
+                                        <select
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            if (!val) return;
+                                            if (val.startsWith("wait:")) {
+                                              swapPlayerInMatch(courtNum, p.id, val.slice(5));
+                                            } else if (val.startsWith("court:")) {
+                                              const [, otherCourt, otherPlayerId] = val.split(":");
+                                              swapPlayerAcrossCourts(courtNum, p.id, Number(otherCourt), otherPlayerId);
+                                            }
+                                          }}
+                                          defaultValue=""
+                                          className="flex-1 text-xs border border-stone-200 rounded-lg px-2 py-1"
+                                        >
+                                          <option value="">다른 사람으로 교체...</option>
+                                          {waitingPlayers.length > 0 && (
+                                            <optgroup label="대기 중">
+                                              {waitingPlayers.map((wp) => (
+                                                <option key={wp.id} value={`wait:${wp.id}`}>{wp.name}</option>
+                                              ))}
+                                            </optgroup>
+                                          )}
+                                          {Object.entries(courtMatches)
+                                            .filter(([cn, cm]) => Number(cn) !== courtNum && cm && !cm.done && cm.date === todayStr())
+                                            .map(([cn, cm]) => (
+                                              <optgroup key={cn} label={`코트 ${cn}에서 뛰는 중 (자리 맞바꿈)`}>
+                                                {[...cm.teamA, ...cm.teamB].map((op) => (
+                                                  <option key={op.id} value={`court:${cn}:${op.id}`}>{op.name}</option>
+                                                ))}
+                                              </optgroup>
+                                            ))}
+                                        </select>
+                                      </div>
+                                    ))}
+                                    {waitingPlayers.length === 0 && Object.values(courtMatches).filter((cm) => cm && !cm.done && cm.date === todayStr()).length <= 1 && (
+                                      <p className="text-[11px] text-stone-400 text-center py-1">지금 바꿀 수 있는 사람이 없어요.</p>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : meetingEndedToday ? (
+                      <div className="px-4 pb-4">
+                        <p className="text-xs text-stone-400 text-center">🏁 오늘 모임이 종료됐어요.</p>
+                      </div>
+                    ) : !adminOn ? (
+                      <div className="px-4 pb-4 space-y-2">
+                        <p className="text-xs text-stone-400 text-center">경기가 끝났어요.</p>
+                        {waitingPlayers.length < 4 && (
+                          <p className="text-xs font-medium text-center" style={{ color: "#B98900" }}>
+                            ⚠️ {4 - waitingPlayers.length}명이 더 필요해요 (대기 {waitingPlayers.length}명 / 4명)
+                          </p>
+                        )}
+                        <button
+                          onClick={() => startRandomMatchAsMember(courtNum)}
+                          disabled={randomBusy === courtNum || waitingPlayers.length < 4}
+                          className="w-full rounded-xl py-2.5 font-semibold text-sm active:scale-[0.98] transition disabled:opacity-40 disabled:bg-stone-200 disabled:text-stone-400"
+                          style={waitingPlayers.length >= 4 ? { backgroundColor: "#FFD54F", color: "#5c4a00" } : {}}
+                        >
+                          {randomBusy === courtNum ? "생성 중..." : "🎲 랜덤 매칭으로 시작"}
+                        </button>
+                      </div>
+                    ) : !isManualHere ? (
+                      <div className="px-4 pb-4 space-y-2">
+                        {waitingPlayers.length < 4 && (
+                          <p className="text-xs font-medium text-center" style={{ color: "#B98900" }}>
+                            ⚠️ {4 - waitingPlayers.length}명이 부족해요. (대기 {waitingPlayers.length}명 / 4명 필요)
+                          </p>
+                        )}
+                        <button
+                          onClick={() => startMatchOnCourt(courtNum)}
+                          disabled={waitingPlayers.length < 4}
+                          className="w-full py-2.5 text-sm font-semibold bg-[#4CAF50] text-white rounded-xl disabled:bg-stone-200 disabled:text-stone-400"
+                        >
+                          🔀 이 코트 다음 경기 시작
+                        </button>
+                        <button
+                          onClick={() => openManualPick(courtNum)}
+                          className="w-full rounded-xl py-2 text-xs font-semibold border"
+                          style={{ borderColor: "#FFD54F", color: "#B98900" }}
+                        >
+                          ✋ 직접 4명 선택해서 시작
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="px-4 pb-4">
+                        <ManualPicker
+                          waitingPlayers={waitingPlayers}
+                          selected={manualSelected}
+                          onToggle={toggleManualPick}
+                          onConfirm={() => confirmManualStart(courtNum)}
+                        onAutoFill={() => autoFillAndStart(courtNum)}
+                          onCancel={cancelManualPick}
+                          pinnedPair={pinnedPair}
+                          onTogglePin={togglePin}
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
+
+          <div className="bc-card p-4">
+            <p className="text-xs font-semibold text-stone-500 mb-1">다음 경기는 쉴래요</p>
+            <p className="text-xs text-stone-400 mb-2">본인 이름은 언제든 누를 수 있고, 관리자는 다른 사람 대신 눌러줄 수도 있어요. 누르면 다음 경기 시작할 때 대기 명단에서 빠져요. 아래 목록은 관리자를 포함해 모두에게 실시간으로 보여요.</p>
+            {Object.keys(restWish).length > 0 && (
+              <p className="text-xs font-semibold mb-2" style={{ color: "#4CAF50" }}>
+                ✋ 쉬고 싶어하는 사람: {players.filter((p) => restWish[p.id]).map((p) => p.name).join(", ") || "-"}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {players.map((p) => {
+                const wantsRest = !!restWish[p.id];
+                const isMe = p.id === myId;
+                const canToggle = isMe || adminOn;
+                return (
+                  <button
+                    key={p.id}
+                    disabled={!canToggle}
+                    onClick={() => toggleRestWish(p.id)}
+                    className={`px-3 py-1.5 rounded-full text-xs border transition ${
+                      wantsRest ? "bg-stone-800 text-white border-stone-800" : "bg-stone-50 text-stone-500 border-stone-200"
+                    } ${!canToggle ? "opacity-40 cursor-not-allowed" : ""}`}
+                  >
+                    {p.name} {wantsRest ? "· 쉼" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {tab === "record" && (
+        <section className="px-5 mt-5 space-y-5">
+          <div>
+            <p className="text-sm font-semibold mb-2">🏆 통산 순위</p>
+            <p className="text-[11px] text-stone-400 mb-2">기록은 저장돼서 새로고침해도 사라지지 않아요.</p>
+            <ul className="space-y-2">
+              {[...players]
+                .map((p) => ({ ...p, stats: lifetimeStatsFor(p.id) }))
+                .sort((a, b) => b.stats.wins - a.stats.wins || b.stats.games - a.stats.games)
+                .map((p, i) => (
+                  <li key={p.id} className="bc-card px-4 py-3 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="scorefont text-sm text-stone-400 w-4">{i + 1}</span>
+                      <span className="text-sm font-medium">{p.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="scorefont text-sm text-stone-500">{p.stats.wins}승 {p.stats.losses}패</span>
+                      {adminOn && (
+                        <button onClick={() => correctPlayerStats(p)} className="text-[11px] text-stone-400 underline underline-offset-2">
+                          수정
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              {players.length === 0 && (
+                <p className="text-sm text-stone-400 bg-white rounded-2xl p-5 text-center border border-dashed border-stone-300">
+                  참석자를 먼저 등록해주세요.
+                </p>
+              )}
+            </ul>
+          </div>
+
+          <div>
+            <p className="text-sm font-semibold mb-2">📋 경기 기록</p>
+            <p className="text-[11px] text-stone-400 mb-2">저장돼서 새로고침해도 안 사라져요.</p>
+            {matchhistory.length === 0 ? (
+              <p className="text-sm text-stone-400 bg-white rounded-2xl p-5 text-center border border-dashed border-stone-300">
+                아직 종료된 경기가 없어요.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {matchhistory.slice(0, 50).map((m) => (
+                  <li key={m.id} className="bc-card px-4 py-3 text-sm">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-[11px] text-stone-400">{m.date} · Court {m.court}</p>
+                      {adminOn && (
+                        <button onClick={() => deleteMatchRecord(m)} className="text-[11px] text-red-400 underline underline-offset-2">삭제</button>
+                      )}
+                    </div>
+                    <div className="flex justify-between items-center gap-2">
+                      <span className="truncate">{m.teamA[0].name}·{m.teamA[1].name}</span>
+                      {adminOn ? (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <NumberSelect value={m.scoreA === "" ? null : Number(m.scoreA)} onChange={(v) => editMatchRecord(m, "scoreA", v == null ? "" : String(v))} max={30} placeholder="-" unit="" />
+                          <span className="text-stone-400">:</span>
+                          <NumberSelect value={m.scoreB === "" ? null : Number(m.scoreB)} onChange={(v) => editMatchRecord(m, "scoreB", v == null ? "" : String(v))} max={30} placeholder="-" unit="" />
+                        </div>
+                      ) : (
+                        <span className="scorefont font-semibold shrink-0">{m.scoreA} : {m.scoreB}</span>
+                      )}
+                      <span className="truncate text-right">{m.teamB[0].name}·{m.teamB[1].name}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      )}
+
+      <BottomNav active="match" />
+      <AppModalHost />
+    </div>
+    </RequireLogin>
+  );
+}
+
+window.authReadyPromise.then(() => {
+  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+});
+</script>
+</body>
+</html>

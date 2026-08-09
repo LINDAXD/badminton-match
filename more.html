@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>더보기 | Birdie</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="./style.css" />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="./firebase.js"></script>
+</head>
+<body>
+<div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#B0B0B0;font-family:sans-serif;font-size:13px;">🏸 불러오는 중...</div></div>
+<script type="text/babel" src="./app.js"></script>
+<script type="text/babel">
+
+function MenuGrid({ items }) {
+  return (
+    <section className="px-5 max-w-2xl mx-auto mb-4">
+      <div className="grid grid-cols-2 gap-3">
+        {items.map((it) => (
+          <button
+            key={it.key}
+            onClick={it.onClick}
+            className="tap-scale bc-card p-4 flex items-center gap-3 text-left"
+          >
+            <span className="text-2xl">{it.emoji}</span>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-stone-800">{it.title}</p>
+              {it.subtitle && <p className="text-[10px] text-stone-400 mt-0.5 truncate">{it.subtitle}</p>}
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const RESET_CATEGORIES = [
+  { key: "reviews", label: "📸 후기 (사진·좋아요·댓글 포함)", refs: ["reviews"], shape: "items" },
+  { key: "notices", label: "📢 공지사항 (좋아요·댓글 포함)", refs: ["notices"], shape: "items" },
+  { key: "schedule", label: "🗓️ 일정 (등록된 모임 전부)", refs: ["schedule"], shape: "items" },
+  { key: "attendance", label: "✅ 출석/참석 기록 (체크인 로그, 로그인 출석, 오늘 참석 상태)", refs: ["checkinlog", "dailylogin", "checkin"], shape: "mixed" },
+  { key: "matching", label: "🎲 매칭/경기 기록 (경기 이력, 현재 코트 상태, 쉬는 상태, 전적 보정)", refs: ["matchhistory", "courtmatches", "restwish", "statsadjust"], shape: "mixed" },
+  { key: "votes", label: "🗳️ 투표 기록 (월간 투표, 또치고싶어요)", refs: ["dailyvotes", "kindvotes"], shape: "mixed" },
+  { key: "noshow", label: "🚫 노쇼 기록", refs: ["noshows"], shape: "items" },
+  { key: "guests", label: "🙋 게스트 명단", refs: ["guestlist"], shape: "items" },
+  { key: "shuttlecock", label: "🏸 셔틀콕 제출/소모 기록", refs: ["shuttlecock"], shape: "mixed" },
+  { key: "roster", label: "⚠️ 회원 명단 (가입 승인 대기 포함) — 전원 로그아웃되고 다시 가입해야 해요!", refs: ["roster", "pending"], shape: "mixed" },
+];
+
+function DataResetPanel() {
+  const { roster } = useRoster();
+  const [checked, setChecked] = React.useState(() =>
+    Object.fromEntries(RESET_CATEGORIES.map((c) => [c.key, c.key !== "roster"]))
+  );
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState("");
+  const [piiBusy, setPiiBusy] = React.useState(false);
+  const [piiMsg, setPiiMsg] = React.useState("");
+
+  function toggle(key) {
+    setChecked((c) => ({ ...c, [key]: !c[key] }));
+  }
+
+  async function runReset() {
+    const selected = RESET_CATEGORIES.filter((c) => checked[c.key]);
+    if (selected.length === 0) return;
+    const labelList = selected.map((c) => c.label.replace(/\s*\(.*\)/, "").replace("⚠️ ", "")).join(", ");
+    if (!(await appConfirm(`정말 초기화할까요?\n\n${labelList}\n\n이 작업은 되돌릴 수 없어요. 테스트 데이터를 정리할 때만 사용해주세요.`))) return;
+    if (checked.roster) {
+      if (!(await appConfirm("회원 명단까지 지우면 본인(관리자)을 포함해 모든 회원이 로그아웃되고, 다시 가입 절차를 거쳐야 해요.\n\n정말 회원 명단도 같이 지울까요?"))) return;
+    }
+    setBusy(true);
+    try {
+      for (const cat of selected) {
+        for (const refKey of cat.refs) {
+          const ref = REFS[refKey];
+          if (!ref) continue;
+          if (refKey === "checkin") {
+            await ref.set({ data: {} });
+          } else if (refKey === "dailyvotes" || refKey === "shuttlecock") {
+            await ref.set({ data: {} });
+          } else if (refKey === "roster") {
+            await ref.set({ members: [] });
+          } else {
+            await ref.set({ items: [] });
+          }
+        }
+      }
+      setMsg("선택한 데이터가 초기화됐어요! ✅");
+    } catch (e) {
+      setMsg("초기화 실패: " + (e && e.message ? e.message : "알 수 없는 오류"));
+    } finally {
+      setBusy(false);
+      setTimeout(() => setMsg(""), 4000);
+    }
+  }
+
+  async function resetPersonalInfoOnly() {
+    if (!(await appConfirm(`이름/등급/레벨/가입일은 그대로 두고, 회원 ${roster.length}명의 개인정보만 지울까요?\n\n(비밀번호, 생일, 프로필 사진, 자기소개, 경력, 친목 태그가 지워져요)\n\n비밀번호가 지워지면 다음 로그인 때 새 비밀번호를 다시 설정해야 해요.`))) return;
+    setPiiBusy(true);
+    try {
+      const cleaned = roster.map((m) => ({
+        id: m.id,
+        name: m.name,
+        grade: m.grade || "일반회원",
+        level: m.level || null,
+        joinedAt: m.joinedAt || null,
+        manualBadges: m.manualBadges || {},
+      }));
+      await REFS.roster.set({ members: cleaned });
+      setPiiMsg("회원 개인정보가 초기화됐어요! ✅");
+    } catch (e) {
+      setPiiMsg("초기화 실패: " + (e && e.message ? e.message : "알 수 없는 오류"));
+    } finally {
+      setPiiBusy(false);
+      setTimeout(() => setPiiMsg(""), 4000);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl p-4 border border-red-200">
+      <p className="text-sm font-bold text-red-500 mb-1">🧹 테스트 데이터 초기화</p>
+      <p className="text-[11px] text-stone-400 mb-3">지워질 항목만 체크하고 초기화하세요. 회원 명단은 여기서 안 지워져요 (회원관리에서 따로 삭제해주세요).</p>
+      <div className="space-y-2 mb-3">
+        {RESET_CATEGORIES.map((c) => (
+          <label key={c.key} className="flex items-start gap-2 text-xs text-stone-600">
+            <input type="checkbox" checked={!!checked[c.key]} onChange={() => toggle(c.key)} className="mt-0.5" />
+            <span>{c.label}</span>
+          </label>
+        ))}
+      </div>
+      <button
+        onClick={runReset}
+        disabled={busy}
+        className="w-full text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-60"
+        style={{ backgroundColor: "#dc2626" }}
+      >
+        {busy ? "초기화 중..." : "선택한 항목 초기화"}
+      </button>
+      {msg && <p className="text-xs mt-2 text-center" style={{ color: msg.includes("됐어요") ? "#4CAF50" : "#dc2626" }}>{msg}</p>}
+
+      <div className="mt-4 pt-4 border-t border-stone-100">
+        <p className="text-xs font-bold text-stone-600 mb-1">🙋 회원 개인정보만 초기화</p>
+        <p className="text-[11px] text-stone-400 mb-2">이름/등급/레벨/가입일은 유지하고, 비밀번호·생일·프로필사진·자기소개·경력·친목태그만 지워요. (회원 자체는 안 지워져요)</p>
+        <button
+          onClick={resetPersonalInfoOnly}
+          disabled={piiBusy}
+          className="w-full rounded-lg py-2.5 text-sm font-semibold border disabled:opacity-60"
+          style={{ borderColor: "#dc2626", color: "#dc2626" }}
+        >
+          {piiBusy ? "초기화 중..." : "회원 개인정보만 초기화"}
+        </button>
+        {piiMsg && <p className="text-xs mt-2 text-center" style={{ color: piiMsg.includes("됐어요") ? "#4CAF50" : "#dc2626" }}>{piiMsg}</p>}
+      </div>
+    </div>
+  );
+}
+
+function ViewHeader({ title, emoji, onBack }) {
+  return (
+    <section className="px-5 max-w-2xl mx-auto mb-3">
+      <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-bold text-stone-700 tap-scale">
+        <span className="text-stone-400">←</span> {emoji} {title}
+      </button>
+    </section>
+  );
+}
+
+function App() {
+  const { myId, myName } = useIdentity();
+  const { roster } = useRoster();
+  const { adminOn, tryUnlock, lock } = useAdmin(isOfficerOf(roster, myId));
+  const [rsvp, setRsvp] = React.useState({});
+  const [checkinlog, setCheckinlog] = React.useState([]);
+  const [schedule, setSchedule] = React.useState([]);
+  const [schedTitle, setSchedTitle] = React.useState("");
+  const [schedDate, setSchedDate] = React.useState("");
+  const [schedTime, setSchedTime] = React.useState("");
+  const [schedLoc, setSchedLoc] = React.useState("");
+  const [schedCapacity, setSchedCapacity] = React.useState("");
+  const [showPastSchedule, setShowPastSchedule] = React.useState(false);
+  const [activeView, setActiveView] = React.useState(() => (window.location.hash === "#schedule" || window.location.hash === "#create" ? "schedule" : null)); // null | "schedule" | "suggestions" | "admin"
+
+  // 홈에서 "모임 만들기"로 들어온 경우, 일정 화면이 뜨자마자 새 모임 만들기 폼으로 자동 스크롤해줘요
+  React.useEffect(() => {
+    if (window.location.hash === "#create" && activeView === "schedule") {
+      setTimeout(() => {
+        const el = document.getElementById("create-schedule-form");
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 150);
+    }
+  }, [activeView]);
+  const [paymentInfo, setPaymentInfo] = React.useState(null);
+  const [payments, setPayments] = React.useState({});
+  const [pfBank, setPfBank] = React.useState("");
+  const [pfAccount, setPfAccount] = React.useState("");
+  const [pfHolder, setPfHolder] = React.useState("");
+  const [pfAmount, setPfAmount] = React.useState("");
+
+  React.useEffect(() => {
+    const u1 = REFS.checkin.onSnapshot((s) => { const d = s.data(); setRsvp(d && d.data ? d.data : {}); });
+    const u2 = REFS.checkinlog.onSnapshot((s) => { const d = s.data(); setCheckinlog(d && d.items ? d.items : []); });
+    const u4 = REFS.schedule.onSnapshot((s) => { const d = s.data(); setSchedule(d && d.items ? d.items : []); });
+    const u5 = REFS.paymentinfo.onSnapshot((s) => {
+      const d = s.data();
+      setPaymentInfo(d && d.bank ? d : null);
+      if (d) { setPfBank(d.bank || ""); setPfAccount(d.account || ""); setPfHolder(d.holder || ""); setPfAmount(d.amount || ""); }
+    }, () => {});
+    const u6 = REFS.payments.onSnapshot((s) => {
+      const d = s.data();
+      const all = d && d.data ? d.data : {};
+      setPayments(all[todayStr()] || {});
+    }, () => {});
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
+  }, []);
+
+  function savePaymentInfo() {
+    if (!pfBank.trim() || !pfAccount.trim() || !pfHolder.trim() || !pfAmount) {
+      appAlert("은행, 계좌번호, 예금주, 금액을 모두 입력해주세요.");
+      return;
+    }
+    REFS.paymentinfo.set({ bank: pfBank.trim(), account: pfAccount.trim(), holder: pfHolder.trim(), amount: Number(pfAmount) }).catch(() => {});
+    appAlert("대관비 계좌 정보가 저장됐어요.");
+  }
+
+  function toggleMemberPaid(memberId) {
+    const paidNow = !payments[memberId];
+    const next = { ...payments, [memberId]: paidNow ? { paid: true, at: new Date().toISOString() } : undefined };
+    if (!paidNow) delete next[memberId];
+    setPayments(next);
+    REFS.payments.get().then((snap) => {
+      const data = snap.data() || {};
+      const all = data.data || {};
+      all[todayStr()] = next;
+      REFS.payments.set({ data: all }).catch(() => {});
+    }).catch(() => {});
+  }
+
+  // 출석왕: checkinlog 기준 누적 출석 최다 회원
+  const attendanceCounts = {};
+  checkinlog.forEach((it) => { attendanceCounts[it.memberId] = (attendanceCounts[it.memberId] || 0) + 1; });
+  const kingId = Object.keys(attendanceCounts).sort((a, b) => attendanceCounts[b] - attendanceCounts[a])[0];
+  const king = roster.find((m) => m.id === kingId);
+
+  // 오늘의 버디: 오늘 참석(in) 체크한 사람 중 날짜 시드로 1명 랜덤 선정 (모두에게 동일)
+  const todayAttendeesRaw = combinedTodayAttendees(schedule, checkinlog, roster);
+  const todayAttendees = todayAttendeesRaw.map((a) => roster.find((m) => m.id === a.id) || a);
+  const seed = new Date().getDate();
+  const buddy = todayAttendees.length ? todayAttendees[seed % todayAttendees.length] : null;
+
+  // 생일회원
+  const birthdayMembers = roster.filter((m) => m.birthday && m.birthday === todayMD());
+
+  function addSchedule() {
+    if (!schedTitle.trim() || !schedDate) { appAlert("일정 제목과 날짜를 입력해주세요."); return; }
+    const item = {
+      id: uid(), title: schedTitle.trim(), date: schedDate, time: schedTime, location: schedLoc.trim(),
+      capacity: schedCapacity ? Number(schedCapacity) : null,
+      rsvp: [],
+    };
+    REFS.schedule.set({ items: [...schedule, item] }).catch(() => {});
+    setSchedTitle(""); setSchedDate(""); setSchedTime(""); setSchedLoc(""); setSchedCapacity("");
+  }
+
+  function removeSchedule(id) {
+    REFS.schedule.set({ items: schedule.filter((s) => s.id !== id) }).catch(() => {});
+  }
+
+  return (
+    <RequireLogin myId={myId}>
+    <div className="min-h-screen bg-white text-stone-800 font-sans pb-24">
+      <TopHeader title="☰ 더보기" subtitle="버디의 다양한 기능들이에요" />
+
+      {activeView === null && (
+        <MenuGrid
+          items={[
+            { key: "schedule", emoji: "🗓️", mascotSlot: "buddy-schedule", title: "일정", subtitle: "참석 체크·출석왕", onClick: () => setActiveView("schedule") },
+            ...(adminOn ? [{ key: "admin", emoji: "🛠️", title: "관리자 전용", subtitle: "회원 관리", onClick: () => setActiveView("admin") }] : []),
+          ]}
+        />
+      )}
+
+      {/* 🗓️ 일정 */}
+      {activeView === "schedule" && (
+      <>
+      <ViewHeader title="일정" emoji="🗓️" onBack={() => setActiveView(null)} />
+      <section className="px-5 max-w-2xl mx-auto mb-4 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rise-in bc-card p-4">
+            <p className="text-[11px] text-stone-400 mb-1">🥇 출석왕</p>
+            <p className="text-sm font-bold text-stone-800">{king ? king.name : "집계 전"}</p>
+            {king && <p className="text-[11px] text-stone-400">누적 {attendanceCounts[kingId]}회 참석</p>}
+          </div>
+          <div className="rise-in bc-card p-4">
+            <p className="text-[11px] text-stone-400 mb-1">🎯 오늘의 버디</p>
+            <p className="text-sm font-bold text-stone-800">{buddy ? buddy.name : "오늘 참석자 없음"}</p>
+          </div>
+        </div>
+
+        {birthdayMembers.length > 0 && (
+          <div className="rise-in rounded-2xl p-4" style={{ backgroundColor: "#FFFBEA", border: "1px solid #FFD54F" }}>
+            <p className="text-[11px] font-bold mb-1" style={{ color: "#B98900" }}>🎂 오늘의 생일 회원</p>
+            <p className="text-sm text-stone-700">{birthdayMembers.map((m) => m.name).join(", ")}님, 생일 축하해요!</p>
+          </div>
+        )}
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-bold text-stone-700">일정 목록</p>
+            {schedule.some((s) => s.date < todayStr()) && (
+              <button onClick={() => setShowPastSchedule((v) => !v)} className="text-[11px] text-stone-400 underline underline-offset-2">
+                {showPastSchedule ? "지난 일정 숨기기" : "지난 일정 보기"}
+              </button>
+            )}
+          </div>
+          {schedule.length === 0 ? (
+            <p className="text-xs text-stone-400 bg-white rounded-2xl p-4 text-center border border-dashed border-stone-200">등록된 일정이 없어요.</p>
+          ) : (
+            <ul className="space-y-2 mb-2">
+              {[...schedule]
+                .filter((s) => showPastSchedule || s.date >= todayStr())
+                .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""))).map((s) => {
+                const rsvpList = s.rsvp || [];
+                const myStatus = myId ? (rsvpList.find((r) => r.id === myId) || {}).status : null;
+                const inList = rsvpList.filter((r) => r.status === "in").sort((a, b) => a.at - b.at);
+                const maybeList = rsvpList.filter((r) => r.status === "maybe");
+                const capacity = s.capacity;
+                const confirmed = capacity ? inList.slice(0, capacity) : inList;
+                const waitlist = capacity ? inList.slice(capacity) : [];
+                const isFull = capacity && confirmed.length >= capacity;
+                return (
+                  <li key={s.id} className="bc-card px-4 py-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-stone-800 truncate">{s.title}</p>
+                        <p className="text-[11px] text-stone-400">
+                          {fmtDate(s.date)}{s.time ? ` · ${fmtTime(s.time)}` : ""}{s.location ? ` · ${s.location}` : ""}
+                        </p>
+                      </div>
+                      {adminOn && <button onClick={() => removeSchedule(s.id)} className="text-red-400 text-xs shrink-0">삭제</button>}
+                    </div>
+
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
+                      <span className="text-[11px] text-stone-500">
+                        👥 {confirmed.length}{capacity ? ` / ${capacity}명` : "명"}
+                        {isFull && <span className="ml-1 font-semibold" style={{ color: "#B98900" }}>정원 마감</span>}
+                      </span>
+                      {waitlist.length > 0 && <span className="text-[11px] text-stone-400">· 대기 {waitlist.length}명</span>}
+                    </div>
+
+                    {confirmed.length > 0 && (
+                      <p className="text-[11px] text-stone-400 mt-1">참석: {confirmed.map((a) => a.name).join(", ")}</p>
+                    )}
+                    {waitlist.length > 0 && (
+                      <p className="text-[11px] text-stone-400 mt-0.5">대기자: {waitlist.map((a) => a.name).join(", ")}</p>
+                    )}
+                    {maybeList.length > 0 && (
+                      <p className="text-[11px] text-stone-400 mt-0.5">미정: {maybeList.map((a) => a.name).join(", ")}</p>
+                    )}
+
+                    <div className="flex gap-1.5 mt-2.5">
+                      <button
+                        onClick={() => setRsvpFor(s, "in", myId, myName)}
+                        className={`flex-1 text-xs font-semibold py-1.5 rounded-lg border tap-scale ${myStatus === "in" ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
+                        style={myStatus === "in" ? { backgroundColor: "#4CAF50" } : {}}
+                      >
+                        ✅ 참석
+                      </button>
+                      <button
+                        onClick={() => setRsvpFor(s, "maybe", myId, myName)}
+                        className={`flex-1 text-xs font-semibold py-1.5 rounded-lg border tap-scale ${myStatus === "maybe" ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
+                        style={myStatus === "maybe" ? { backgroundColor: "#FFD54F", color: "#5c4a00" } : {}}
+                      >
+                        ❓ 미정
+                      </button>
+                      <button
+                        onClick={() => setRsvpFor(s, "out", myId, myName)}
+                        className={`flex-1 text-xs font-semibold py-1.5 rounded-lg border tap-scale ${myStatus === "out" ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
+                        style={myStatus === "out" ? { backgroundColor: "#dc2626" } : {}}
+                      >
+                        ❌ 불참
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {schedule.length > 0 && schedule.filter((s) => showPastSchedule || s.date >= todayStr()).length === 0 && (
+            <p className="text-xs text-stone-400 bg-white rounded-2xl p-4 text-center border border-dashed border-stone-200 mb-2">다가오는 일정이 없어요. "지난 일정 보기"를 눌러보세요.</p>
+          )}
+          {myId && (
+            <div id="create-schedule-form" className="bc-card p-4 space-y-2">
+              <p className="text-sm font-semibold text-stone-700">➕ 새 모임 만들기</p>
+              <input value={schedTitle} onChange={(e) => setSchedTitle(e.target.value)} placeholder="일정 제목" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+              <div className="flex gap-2">
+                <input type="date" value={schedDate} onChange={(e) => setSchedDate(e.target.value)} className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+                <input type="time" value={schedTime} onChange={(e) => setSchedTime(e.target.value)} className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+              </div>
+              <input value={schedLoc} onChange={(e) => setSchedLoc(e.target.value)} placeholder="장소(선택)" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-stone-400 shrink-0">정원(선택)</span>
+                <select value={schedCapacity} onChange={(e) => setSchedCapacity(e.target.value)} className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm">
+                  <option value="">제한 없음</option>
+                  {Array.from({ length: 40 }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>{n}명</option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-[11px] text-stone-400">정원을 채우면 그 다음 신청자는 자동으로 대기자로 표시돼요. 만든 모임은 관리자가 삭제할 수 있어요.</p>
+              <button onClick={addSchedule} className="w-full text-white rounded-lg py-2 text-sm font-semibold" style={{ backgroundColor: "#4CAF50" }}>일정 추가</button>
+            </div>
+          )}
+        </div>
+      </section>
+      </>
+      )}
+
+      {/* 🛠️ 관리자 전용 */}
+      {activeView === "admin" && (
+      <>
+      <ViewHeader title="관리자 전용" emoji="🛠️" onBack={() => setActiveView(null)} />
+      <section className="px-5 max-w-2xl mx-auto mb-4 space-y-4">
+        <div className="flex items-center justify-end -mt-1">
+          <button
+            onClick={adminOn ? lock : () => tryUnlock()}
+            className={`text-[11px] px-3 py-1.5 rounded-full border ${adminOn ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
+            style={adminOn ? { backgroundColor: "#4CAF50" } : {}}
+          >
+            {adminOn ? "🔓 관리자" : "🔒 관리자"}
+          </button>
+        </div>
+        {adminOn ? (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <a href="./members.html" className="tap-scale bc-card p-3 text-center text-xs font-semibold text-stone-600">👥 회원 삭제/수정</a>
+              <a href="./match.html" className="tap-scale bc-card p-3 text-center text-xs font-semibold text-stone-600">🎲 매칭·기록 관리</a>
+            </div>
+            {(() => {
+              const thisMonth = todayStr().slice(0, 7);
+              const attendedThisMonth = new Set(checkinlog.filter((c) => c.date.slice(0, 7) === thisMonth).map((c) => c.memberId));
+              const needsAttention = roster.filter((m) => {
+                if (attendedThisMonth.has(m.id)) return false;
+                if (m.joinedAt && m.joinedAt.slice(0, 7) === thisMonth) {
+                  const daysSinceJoin = Math.floor((new Date() - new Date(m.joinedAt)) / 86400000);
+                  if (daysSinceJoin < 20) return false;
+                }
+                return true;
+              });
+              if (needsAttention.length === 0) return null;
+              return (
+                <div>
+                  <p className="text-sm font-bold text-stone-700 mb-2">⚠️ 이번 달 아직 참석 안 한 회원</p>
+                  <p className="text-[11px] text-stone-400 mb-2">가입일부터, 또는 매달 최소 1회는 참석하는 게 원칙이에요.</p>
+                  <div className="bc-card p-4">
+                    <div className="flex flex-wrap gap-1.5">
+                      {needsAttention.map((m) => (
+                        <span key={m.id} className="text-xs bg-red-50 border border-red-200 text-red-500 rounded-full px-2.5 py-1">{m.name}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <DataResetPanel />
+          </>
+        ) : (
+          <p className="text-xs text-stone-400 bg-white rounded-2xl p-4 text-center border border-dashed border-stone-200">관리자 인증 후 이용 가능해요.</p>
+        )}
+      </section>
+      </>
+      )}
+
+      <BottomNav active="more" />
+      <AppModalHost />
+    </div>
+    </RequireLogin>
+  );
+}
+
+window.authReadyPromise.then(() => {
+  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+});
+</script>
+</body>
+</html>

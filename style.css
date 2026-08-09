@@ -1,0 +1,99 @@
+/* style.css — Birdie Club 공통 스타일 */
+
+body {
+  margin: 0;
+  background: #FFFFFF;
+  -webkit-tap-highlight-color: transparent;
+  word-break: keep-all; /* 한글 단어 중간에서 어색하게 줄바꿈되는 것 방지 */
+  overflow-wrap: break-word;
+}
+
+.headfont {
+  font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.scorefont {
+  font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* brand palette helpers (Tailwind arbitrary-value friendly, but keep plain classes too) */
+.bc-green { color: #4CAF50; }
+.bc-bg-green { background-color: #4CAF50; }
+.bc-yellow { color: #FFD54F; }
+.bc-bg-yellow { background-color: #FFD54F; }
+
+/* floating birdie on hero */
+@keyframes floaty {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-10px) rotate(2deg); }
+}
+.floaty { animation: floaty 3s ease-in-out infinite; }
+
+/* fade+rise for cards / match results */
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.rise-in { animation: riseIn 0.35s ease-out both; }
+
+/* shuffle pulse for random matching button */
+@keyframes shufflePulse {
+  0% { transform: rotate(0deg) scale(1); }
+  30% { transform: rotate(-8deg) scale(1.05); }
+  60% { transform: rotate(8deg) scale(1.05); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+.shuffle-pulse { animation: shufflePulse 0.5s ease-in-out; }
+
+/* skeleton shimmer for loading states */
+@keyframes shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: 200px 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, #f3f4f6 25%, #e9ecef 37%, #f3f4f6 63%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* bottom nav */
+.bc-bottomnav {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  background: #ffffff;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  z-index: 40;
+}
+.bc-bottomnav a, .bc-bottomnav button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 0 9px;
+  font-size: 10px;
+  color: #A8A8A8;
+  text-decoration: none;
+  background: none;
+  border: none;
+  white-space: nowrap;
+}
+.bc-bottomnav .active {
+  color: #4CAF50;
+  font-weight: 700;
+}
+.bc-bottomnav .icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* simple card pop on tap */
+.tap-scale { transition: transform 0.12s ease; }
+.tap-scale:active { transform: scale(0.96); }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: #e5e5e5; border-radius: 999px; }
