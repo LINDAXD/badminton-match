@@ -150,6 +150,15 @@ function App() {
   const [checkinlog, setCheckinlog] = React.useState([]);
   const [dailyvotesDoc, setDailyvotesDoc] = React.useState({});
   const [courtMatches, setCourtMatches] = React.useState({});
+  const [matchhistory, setMatchhistory] = React.useState([]);
+
+  React.useEffect(() => {
+    const unsub = REFS.matchhistory.onSnapshot((snap) => {
+      const data = snap.data();
+      setMatchhistory(data && data.items ? data.items : []);
+    }, () => {});
+    return () => unsub();
+  }, []);
 
   React.useEffect(() => {
     const unsub = REFS.courtmatches.onSnapshot((snap) => {
@@ -362,8 +371,60 @@ function App() {
   const waitingNow = attendingMembers.filter((m) => !occupiedIds.has(m.id));
   const nextUp = waitingNow.slice(0, 2);
 
+  // 내가 지금 뛰고 있는 코트가 있으면 찾아서 홈에서 바로 보여줘요 (매칭 화면까지 안 들어가도 알 수 있게)
+  let myCourtInfo = null;
+  if (myId) {
+    for (const [courtNum, m] of Object.entries(courtMatches)) {
+      if (!m || m.done || m.date !== todayStr()) continue;
+      const inA = (m.teamA || []).some((p) => p.id === myId);
+      const inB = (m.teamB || []).some((p) => p.id === myId);
+      if (inA || inB) {
+        const mine = inA ? m.teamA : m.teamB;
+        const opp = inA ? m.teamB : m.teamA;
+        myCourtInfo = {
+          court: courtNum,
+          teammate: (mine.find((p) => p.id !== myId) || {}).name,
+          opponents: opp.map((p) => p.name),
+        };
+        break;
+      }
+    }
+  }
+
+  // 내 기록 요약 (실력점수/급수/승률/총경기) — 매칭 화면과 같은 계산 방식
+  function lifetimeStatsFor(id) {
+    let games = 0, wins = 0, losses = 0;
+    matchhistory.forEach((m) => {
+      const inA = (m.teamA || []).some((p) => p.id === id);
+      const inB = (m.teamB || []).some((p) => p.id === id);
+      if (!inA && !inB) return;
+      if (m.scoreA === "" || m.scoreB === "" || isNaN(Number(m.scoreA)) || isNaN(Number(m.scoreB))) return;
+      games++;
+      const sA = Number(m.scoreA), sB = Number(m.scoreB);
+      const won = inA ? sA > sB : sB > sA;
+      if (won) wins++; else losses++;
+    });
+    return { games, wins, losses };
+  }
+  const myLifetimeStats = myId ? lifetimeStatsFor(myId) : null;
+  const myWinRate = myLifetimeStats && myLifetimeStats.games > 0 ? Math.round((myLifetimeStats.wins / myLifetimeStats.games) * 100) : 0;
+  const mySkillScore = me ? getSkillScore(me) : null;
+  const myStage = myLifetimeStats ? evaluationStage(myLifetimeStats.games) : null;
+  const myTier = myLifetimeStats ? tierForScore(mySkillScore, myLifetimeStats.games) : null;
+  const myRecentMatches = myId
+    ? matchhistory
+        .filter((m) => (m.teamA || []).some((p) => p.id === myId) || (m.teamB || []).some((p) => p.id === myId))
+        .filter((m) => m.scoreA !== "" && m.scoreB !== "" && !isNaN(Number(m.scoreA)) && !isNaN(Number(m.scoreB)))
+        .slice(0, 3)
+        .map((m) => {
+          const inA = (m.teamA || []).some((p) => p.id === myId);
+          const won = inA ? Number(m.scoreA) > Number(m.scoreB) : Number(m.scoreB) > Number(m.scoreA);
+          return { id: m.id, date: m.date, won };
+        })
+    : [];
+
   return (
-    <div className="min-h-screen pb-24 font-sans" style={{ backgroundColor: "#FAFAF8", color: "#2A2A28" }}>
+    <div className="min-h-screen pb-24 font-sans" style={{ backgroundColor: "#F7F8FA", color: "#2A2A28" }}>
       {/* top greeting card — 흰 카드 + 얇은 네이비 포인트만, 화면 전체를 색으로 덮지 않게 */}
       <header className="px-5 pt-6 pb-5 max-w-2xl mx-auto">
         <div className="rise-in bc-card p-5 relative overflow-hidden">
@@ -647,6 +708,126 @@ function App() {
           )}
         </div>
       </section>
+
+      {/* ② 오늘의 매칭 — 내가 지금 뛰고 있으면 코트/상대를 바로 보여줘요 */}
+      {myId && isRealToday && (
+        <section className="px-5 max-w-2xl mx-auto mb-4">
+          <div className="bc-card overflow-hidden">
+            {myCourtInfo ? (
+              <>
+                <div className="px-4 py-3 flex items-center justify-between" style={{ backgroundColor: "var(--bc-navy)" }}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">🏸</span>
+                    <p className="text-white font-bold text-base">{myCourtInfo.court}코트</p>
+                  </div>
+                  <span className="bc-badge2 bc-badge2-playing">🟢 게임 진행 중</span>
+                </div>
+                <div className="px-4 pt-4 pb-4">
+                  <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-blue)" }}>
+                    <p className="text-[10px] font-bold tracking-widest mb-1 text-white/80">🔵 A팀</p>
+                    <p className="text-base font-bold text-white">나{myCourtInfo.teammate && <> · {myCourtInfo.teammate}</>}</p>
+                  </div>
+                  <p className="text-center text-xs text-stone-400 my-1.5 font-bold">VS</p>
+                  <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-orange)" }}>
+                    <p className="text-[10px] font-bold tracking-widest mb-1 text-white/80">🟠 B팀</p>
+                    <p className="text-base font-bold text-white">{myCourtInfo.opponents.join(" · ")}</p>
+                  </div>
+                  <a href="./match.html" className="bc-btn-lg mt-3 w-full text-sm border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
+                    매칭 화면에서 보기 →
+                  </a>
+                </div>
+              </>
+            ) : (
+              <div className="p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-stone-700">🕒 매칭 대기 중이에요</p>
+                  <p className="text-xs text-stone-400 mt-0.5">코트가 배정되면 여기서 바로 보여드릴게요.</p>
+                </div>
+                <a href="./match.html" className="text-xs font-bold shrink-0" style={{ color: "var(--bc-blue)" }}>
+                  매칭 화면 →
+                </a>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* ③ 모임 현황 — 작은 카드 4개 */}
+      {isRealToday && attendCount > 0 && (
+        <section className="px-5 max-w-2xl mx-auto mb-4">
+          <div className="grid grid-cols-4 gap-2">
+            <div className="bc-card p-3 text-center">
+              <p className="headfont text-xl text-stone-800">{attendCount}</p>
+              <p className="text-[10px] text-stone-400 mt-0.5">참석자</p>
+            </div>
+            <div className="bc-card p-3 text-center">
+              <p className="headfont text-xl" style={{ color: "var(--bc-blue)" }}>{occupiedIds.size}</p>
+              <p className="text-[10px] text-stone-400 mt-0.5">게임 중</p>
+            </div>
+            <div className="bc-card p-3 text-center">
+              <p className="headfont text-xl" style={{ color: "var(--bc-orange)" }}>{waitingNow.length}</p>
+              <p className="text-[10px] text-stone-400 mt-0.5">대기자</p>
+            </div>
+            <div className="bc-card p-3 text-center">
+              <p className="headfont text-xl text-stone-800">{activeCourts}</p>
+              <p className="text-[10px] text-stone-400 mt-0.5">코트 수</p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ④ 최근 경기 + ⑤ 내 기록 */}
+      {myId && myLifetimeStats && (
+        <section className="px-5 max-w-2xl mx-auto mb-4">
+          <div className="bc-card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[11px] font-semibold text-stone-400 tracking-wide">🙋 내 기록</p>
+              {myTier && (
+                <span className="bc-badge2" style={{ backgroundColor: "var(--bc-blue)", color: "white" }}>
+                  {myStage === "provisional0" ? "🆕 평가중" : myStage === "provisional1" ? "🟡 임시급수" : `${myTier}급`}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-4 gap-2 text-center mb-3">
+              <div>
+                <p className="scorefont text-lg font-bold text-stone-800">{Math.round(mySkillScore)}</p>
+                <p className="text-[10px] text-stone-400 mt-0.5">실력점수</p>
+              </div>
+              <div>
+                <p className="scorefont text-lg font-bold text-stone-800">{myTier || "-"}</p>
+                <p className="text-[10px] text-stone-400 mt-0.5">급수</p>
+              </div>
+              <div>
+                <p className="scorefont text-lg font-bold" style={{ color: "var(--bc-blue)" }}>{myWinRate}%</p>
+                <p className="text-[10px] text-stone-400 mt-0.5">승률</p>
+              </div>
+              <div>
+                <p className="scorefont text-lg font-bold text-stone-800">{myLifetimeStats.games}</p>
+                <p className="text-[10px] text-stone-400 mt-0.5">총 경기</p>
+              </div>
+            </div>
+            {myRecentMatches.length > 0 && (
+              <div className="pt-3 border-t" style={{ borderColor: "var(--bc-line)" }}>
+                <p className="text-[11px] text-stone-400 mb-2">최근 경기</p>
+                <div className="flex gap-2">
+                  {myRecentMatches.map((m) => (
+                    <span
+                      key={m.id}
+                      className="bc-badge2"
+                      style={m.won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
+                    >
+                      {m.won ? "승리" : "패배"}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <a href="./match.html" className="block text-center text-xs font-semibold mt-3" style={{ color: "var(--bc-blue)" }}>
+              전체 기록 보기 →
+            </a>
+          </div>
+        </section>
+      )}
 
       {/* 오늘의 한마디 */}
       <section className="px-5 max-w-2xl mx-auto mb-8 flex items-center justify-center gap-1.5 text-center">
