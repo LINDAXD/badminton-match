@@ -189,6 +189,22 @@ function App() {
   const [schedCapacity, setSchedCapacity] = React.useState("");
   const [showPastSchedule, setShowPastSchedule] = React.useState(false);
   const [activeView, setActiveView] = React.useState(() => (window.location.hash === "#schedule" || window.location.hash === "#create" ? "schedule" : null)); // null | "schedule" | "suggestions" | "admin"
+  const [matchhistory, setMatchhistory] = React.useState([]);
+  const [dailyvotes, setDailyvotesDoc] = React.useState({});
+  React.useEffect(() => {
+    const unsub = REFS.matchhistory.onSnapshot((snap) => {
+      const data = snap.data();
+      setMatchhistory(data && data.items ? data.items : []);
+    }, () => {});
+    return () => unsub();
+  }, []);
+  React.useEffect(() => {
+    const unsub = REFS.dailyvotes.onSnapshot((snap) => {
+      const data = snap.data();
+      setDailyvotesDoc(data && data.data ? data.data : {});
+    }, () => {});
+    return () => unsub();
+  }, []);
 
   // 홈에서 "모임 만들기"로 들어온 경우, 일정 화면이 뜨자마자 새 모임 만들기 폼으로 자동 스크롤해줘요
   React.useEffect(() => {
@@ -275,19 +291,228 @@ function App() {
     REFS.schedule.set({ items: schedule.filter((s) => s.id !== id) }).catch(() => {});
   }
 
+  // ===== 마이 화면: 내 기록/랭킹 요약 =====
+  function matchWinnerSide(m) {
+    if (m.winner === "A" || m.winner === "B") return m.winner;
+    const sA = Number(m.scoreA), sB = Number(m.scoreB);
+    if (m.scoreA === "" || m.scoreB === "" || isNaN(sA) || isNaN(sB) || sA === sB) return null;
+    return sA > sB ? "A" : "B";
+  }
+  function lifetimeStatsFor(id) {
+    let games = 0, wins = 0, losses = 0;
+    matchhistory.forEach((m) => {
+      const inA = (m.teamA || []).some((p) => p.id === id);
+      const inB = (m.teamB || []).some((p) => p.id === id);
+      if (!inA && !inB) return;
+      const side = matchWinnerSide(m);
+      if (!side) return;
+      games++;
+      if ((inA && side === "A") || (inB && side === "B")) wins++; else losses++;
+    });
+    return { games, wins, losses };
+  }
+  const me = roster.find((r) => r.id === myId);
+  const myStats = myId ? lifetimeStatsFor(myId) : { games: 0, wins: 0, losses: 0 };
+  const myRate = myStats.games > 0 ? Math.round((myStats.wins / myStats.games) * 100) : 0;
+  const mySkill = me ? getSkillScore(me) : null;
+  const myStage = evaluationStage(myStats.games);
+  const myTier = tierForScore(mySkill, myStats.games);
+
+  // 전체 랭킹에서 내 순위 (기록 화면/랭킹 화면과 동일한 기준: 10경기 이상, 실력점수순)
+  const RANKING_MIN_GAMES = 10;
+  const rankedList = roster
+    .map((p) => ({ id: p.id, stats: lifetimeStatsFor(p.id), skill: getSkillScore(p) }))
+    .filter((p) => p.stats.games >= RANKING_MIN_GAMES)
+    .sort((a, b) => (b.skill - a.skill) || (b.stats.games - a.stats.games));
+  const myRankIdx = rankedList.findIndex((p) => p.id === myId);
+
+  // 내 배지 (경기 기록 기반)
+  const myMatchBadges = [
+    { emoji: "🏸", label: "첫 경기", earned: myStats.games >= 1, cond: "첫 경기를 마치면 획득해요." },
+    { emoji: "🔥", label: "10경기 달성", earned: myStats.games >= 10, cond: "누적 10경기를 채우면 획득해요." },
+    { emoji: "🏆", label: "첫 승", earned: myStats.wins >= 1, cond: "첫 승리를 거두면 획득해요." },
+    { emoji: "👑", label: "10승 달성", earned: myStats.wins >= 10, cond: "누적 10승을 달성하면 획득해요." },
+    { emoji: "⭐", label: "MVP", earned: !!(me && me.manualBadges && me.manualBadges.mvp), cond: "이달의 MVP로 뽑히면 획득해요." },
+  ];
+
+  // 개인 공개설정 / 알림설정 저장
+  function updateMyPrivacy(key, value) {
+    const next = roster.map((m) => (m.id === myId ? { ...m, privacy: { ...(m.privacy || {}), [key]: value } } : m));
+    REFS.roster.set({ members: next }).catch(() => {});
+  }
+  function updateMyNotif(key, value) {
+    const next = roster.map((m) => (m.id === myId ? { ...m, notifPrefs: { ...(m.notifPrefs || {}), [key]: value } } : m));
+    REFS.roster.set({ members: next }).catch(() => {});
+  }
+  const privacy = { birthday: true, winRate: true, matchRecord: true, ...(me && me.privacy) };
+  const notifPrefs = { matching: true, result: true, notice: true, ...(me && me.notifPrefs) };
+
   return (
     <RequireLogin myId={myId}>
     <div className="min-h-screen bg-white text-stone-800 font-sans pb-24">
       <TopHeader title="☰ 더보기" subtitle="버디의 다양한 기능들이에요" />
 
       {activeView === null && (
-        <MenuGrid
-          items={[
-            { key: "schedule", emoji: "🗓️", mascotSlot: "buddy-schedule", title: "일정", subtitle: "참석 체크·출석왕", onClick: () => setActiveView("schedule") },
-            { key: "members", emoji: "👥", title: "회원", subtitle: "전체 회원 명단 보기", onClick: () => { window.location.href = "./members.html"; } },
-            ...(adminOn ? [{ key: "admin", emoji: "🛠️", title: "관리자 전용", subtitle: "회원 관리", onClick: () => setActiveView("admin") }] : []),
-          ]}
-        />
+        <>
+          {/* ⭐ 내 정보 한눈에 보기 — 마이 화면 맨 위 */}
+          {myId && (
+            <section className="px-5 max-w-2xl mx-auto mb-4">
+              <div className="bc-card p-4">
+                <div className="flex items-center gap-3.5">
+                  <Avatar name={me ? me.name : myName} photoUrl={me && me.photoUrl} size={56} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-lg font-bold text-stone-800 truncate">{me ? me.name : myName}</p>
+                      <span className="bc-badge2" style={{ backgroundColor: "var(--bc-blue)", color: "white" }}>
+                        {myStage === "provisional0" ? "🆕 평가중" : myStage === "provisional1" ? "🟡 임시급수" : `${myTier}급`}
+                      </span>
+                    </div>
+                    <p className="text-sm text-stone-500 mt-0.5">
+                      {myStage === "provisional0" ? `평가중 · ${myStats.games}/10경기` : `${myTier}급 · ${Math.round(mySkill)}점`}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-4 gap-1.5 mt-3.5 pt-3.5 border-t" style={{ borderColor: "var(--bc-line)" }}>
+                  <a href="./match.html?tab=record" className="text-center">
+                    <p className="scorefont text-base font-bold text-stone-800">{myStats.games}</p>
+                    <p className="text-[10px] text-stone-400">경기</p>
+                  </a>
+                  <a href="./match.html?tab=record" className="text-center">
+                    <p className="scorefont text-base font-bold" style={{ color: "#16A34A" }}>{myStats.wins}</p>
+                    <p className="text-[10px] text-stone-400">승</p>
+                  </a>
+                  <a href="./match.html?tab=record" className="text-center">
+                    <p className="scorefont text-base font-bold" style={{ color: "var(--bc-blue)" }}>{myRate}%</p>
+                    <p className="text-[10px] text-stone-400">승률</p>
+                  </a>
+                  <a href="./match.html?tab=ranking" className="text-center">
+                    <p className="scorefont text-base font-bold text-stone-800">{myRankIdx >= 0 ? `${myRankIdx + 1}위` : "-"}</p>
+                    <p className="text-[10px] text-stone-400">랭킹</p>
+                  </a>
+                </div>
+
+                <a
+                  href="./members.html?edit=me"
+                  className="bc-btn-lg bc-btn-primary w-full mt-3.5 text-sm"
+                >
+                  프로필 수정
+                </a>
+              </div>
+            </section>
+          )}
+
+          {/* ③ 내 배지 */}
+          {myId && (
+            <section className="px-5 max-w-2xl mx-auto mb-4">
+              <div className="bc-card p-4">
+                <p className="text-xs font-bold text-stone-400 mb-3">🎖️ 내 배지</p>
+                <div className="grid grid-cols-5 gap-2">
+                  {myMatchBadges.map((b) => (
+                    <button
+                      key={b.label}
+                      onClick={() => appAlert(b.earned ? `✅ 획득 완료!\n${b.label}` : `🔒 아직 획득 전이에요.\n${b.cond}`)}
+                      className="flex flex-col items-center gap-1"
+                      style={!b.earned ? { opacity: 0.35 } : {}}
+                    >
+                      <span className="text-2xl">{b.emoji}</span>
+                      <span className="text-[10px] text-stone-500 text-center leading-tight">{b.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* ④ 모임 활동 */}
+          {myId && (
+            <MenuGrid
+              items={[
+                { key: "attend", emoji: "📅", title: "나의 참석 기록", subtitle: "일정·출석 확인", onClick: () => setActiveView("schedule") },
+                { key: "myrecord", emoji: "🏸", title: "나의 경기 기록", subtitle: "경기 상세 보기", onClick: () => { window.location.href = "./match.html?tab=record"; } },
+                { key: "myranking", emoji: "🏆", title: "나의 랭킹", subtitle: "다른 회원과 비교", onClick: () => { window.location.href = "./match.html?tab=ranking"; } },
+                { key: "votes", emoji: "⭐", title: "받은 투표", subtitle: "친절왕·MVP 등", onClick: () => setActiveView("votes") },
+              ]}
+            />
+          )}
+
+          {/* 일정 (기존 메뉴) */}
+          <MenuGrid
+            items={[
+              { key: "schedule", emoji: "🗓️", mascotSlot: "buddy-schedule", title: "일정", subtitle: "참석 체크·출석왕", onClick: () => setActiveView("schedule") },
+              { key: "members", emoji: "👥", title: "회원", subtitle: "전체 회원 명단 보기", onClick: () => { window.location.href = "./members.html"; } },
+              ...(adminOn ? [{ key: "admin", emoji: "🛠️", title: "관리자 전용", subtitle: "회원 관리", onClick: () => setActiveView("admin") }] : []),
+            ]}
+          />
+
+          {/* ⑥ 개인 공개 설정 + ⑦ 알림 설정 */}
+          {myId && (
+            <section className="px-5 max-w-2xl mx-auto mb-4 space-y-3">
+              <div className="bc-card p-4">
+                <p className="text-xs font-bold text-stone-400 mb-1">🔒 개인 공개 설정</p>
+                <p className="text-[11px] text-stone-400 mb-3">실력점수·급수는 매칭에 필요해서 모임 내 항상 표시돼요.</p>
+                {[
+                  { key: "birthday", label: "생일 공개" },
+                  { key: "winRate", label: "승률 공개" },
+                  { key: "matchRecord", label: "경기 기록 공개" },
+                ].map((row) => (
+                  <div key={row.key} className="flex items-center justify-between py-2">
+                    <span className="text-sm text-stone-700">{row.label}</span>
+                    <button
+                      onClick={() => updateMyPrivacy(row.key, !privacy[row.key])}
+                      className="w-11 h-6 rounded-full relative tap-scale shrink-0"
+                      style={{ backgroundColor: privacy[row.key] ? "var(--bc-blue)" : "#e5e5e5" }}
+                    >
+                      <span className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all" style={{ left: privacy[row.key] ? "22px" : "2px" }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bc-card p-4">
+                <p className="text-xs font-bold text-stone-400 mb-1">🔔 알림 설정</p>
+                <p className="text-[11px] text-stone-400 mb-3">알림 발송 기능은 준비 중이에요. 켜두시면 나중에 자동으로 적용돼요.</p>
+                {[
+                  { key: "matching", label: "🔔 매칭 알림" },
+                  { key: "result", label: "🔔 경기 결과 알림" },
+                  { key: "notice", label: "🔔 모임 공지 알림" },
+                ].map((row) => (
+                  <div key={row.key} className="flex items-center justify-between py-2">
+                    <span className="text-sm text-stone-700">{row.label}</span>
+                    <button
+                      onClick={() => updateMyNotif(row.key, !notifPrefs[row.key])}
+                      className="w-11 h-6 rounded-full relative tap-scale shrink-0"
+                      style={{ backgroundColor: notifPrefs[row.key] ? "var(--bc-blue)" : "#e5e5e5" }}
+                    >
+                      <span className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all" style={{ left: notifPrefs[row.key] ? "22px" : "2px" }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {/* ⭐ 받은 투표 */}
+      {activeView === "votes" && (
+        <>
+          <ViewHeader title="받은 투표" emoji="⭐" onBack={() => setActiveView(null)} />
+          <section className="px-5 max-w-2xl mx-auto mb-4">
+            <div className="bc-card p-4 space-y-3">
+              {window.VOTE_CATEGORIES.map((c) => {
+                const count = cumulativeWins(dailyvotes, myId, c.key, false);
+                return (
+                  <div key={c.key} className="flex items-center justify-between">
+                    <span className="text-sm text-stone-700">{c.emoji} {c.label}</span>
+                    <span className="scorefont text-base font-bold" style={{ color: "var(--bc-blue)" }}>{count}회</span>
+                  </div>
+                );
+              })}
+              <p className="text-[11px] text-stone-400 pt-2 border-t" style={{ borderColor: "var(--bc-line)" }}>매월 1일 새로 집계돼요.</p>
+            </div>
+          </section>
+        </>
       )}
 
       {/* 🗓️ 일정 */}
@@ -443,8 +668,10 @@ function App() {
         {adminOn ? (
           <>
             <div className="grid grid-cols-2 gap-3">
-              <a href="./members.html" className="tap-scale bc-card p-3 text-center text-xs font-semibold text-stone-600">👥 회원 삭제/수정</a>
-              <a href="./match.html" className="tap-scale bc-card p-3 text-center text-xs font-semibold text-stone-600">🎲 매칭·기록 관리</a>
+              <a href="./members.html" className="tap-scale bc-card p-3 text-center text-xs font-semibold text-stone-600">👥 회원 관리</a>
+              <button onClick={() => setActiveView("schedule")} className="tap-scale bc-card p-3 text-center text-xs font-semibold text-stone-600">🗓️ 일정 관리</button>
+              <a href="./match.html?tab=match" className="tap-scale bc-card p-3 text-center text-xs font-semibold text-stone-600">🔀 매칭 관리</a>
+              <a href="./match.html?tab=match" className="tap-scale bc-card p-3 text-center text-xs font-semibold text-stone-600">⚙️ 모임 설정</a>
             </div>
             {(() => {
               const thisMonth = todayStr().slice(0, 7);

@@ -68,6 +68,17 @@ function App() {
     return () => unsub();
   }, []);
   const [profileMember, setProfileMember] = React.useState(null);
+  const { myId } = useIdentity();
+
+  // 마이 화면 "프로필 수정"에서 넘어오면 내 프로필 수정 모달을 바로 열어줘요.
+  React.useEffect(() => {
+    if (!myId || !roster.length) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("edit") === "me") {
+      const me = roster.find((r) => r.id === myId);
+      if (me) setProfileMember(me);
+    }
+  }, [myId, roster]);
 
   React.useEffect(() => {
     const unsub = REFS.checkinlog.onSnapshot((snap) => {
@@ -90,7 +101,6 @@ function App() {
     persist(next);
     setProfileMember((prev) => (prev ? { ...prev, ...fields } : prev));
   }
-  const { myId } = useIdentity();
   const { adminOn, tryUnlock, lock } = useAdmin(isOfficerOf(roster, myId));
   const [search, setSearch] = React.useState("");
   const [socialFilter, setSocialFilter] = React.useState([]);
