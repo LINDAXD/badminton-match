@@ -857,6 +857,19 @@ function logAttendance(memberId) {
   }).catch(() => {});
 }
 
+// 참석 취소(끄기) 시 오늘 날짜 출석기록을 서버에서도 지워요.
+// (이걸 안 지우면, 참석자 목록을 checkinlog 기준으로 다시 계산할 때 취소한 사람이 도로 나타나요.)
+function removeAttendanceLog(memberId) {
+  if (!memberId) return;
+  const today = todayStr();
+  db.runTransaction(async (tx) => {
+    const snap = await tx.get(REFS.checkinlog);
+    const data = snap.data() || {};
+    const items = (data.items || []).filter((it) => !(it.memberId === memberId && it.date === today));
+    tx.set(REFS.checkinlog, { items });
+  }).catch(() => {});
+}
+
 // ---------- 경기 결과 기록 (내 정보 > 경기 기록용) ----------
 // 여러 코트가 거의 동시에 경기를 끝내도 서로 기록이 안 사라지게, 트랜잭션으로 안전하게 추가해요.
 function logMatchResult(record) {

@@ -961,9 +961,13 @@ function App() {
     const next = { ...rsvp, [memberId]: status };
     setRsvp(next);
     CHECKIN_REF.set({ data: next }).catch(() => {});
+    const today = todayStr();
     if (status === "in") {
       logAttendance(memberId);
       markWaiting([memberId]);
+      // checkinlog 로컬 상태도 바로 갱신해서, 참석자 재계산(useEffect)이 서버 응답을 기다리다가
+      // 화면을 잠깐 되돌리는 깜빡임(느린 반응처럼 보이는 원인)이 안 생기게 해요.
+      setCheckinlog((prev) => (prev.some((c) => c.memberId === memberId && c.date === today) ? prev : [...prev, { id: uid(), memberId, date: today }]));
       // 참석으로 표시하면 자동으로 오늘 참석자(매칭 대상) 명단에도 들어가요 — 따로 또 누를 필요 없어요
       setPlayers((p) => {
         if (p.some((x) => x.id === memberId)) return p;
@@ -972,6 +976,8 @@ function App() {
         return [...p, { id: m.id, name: m.name, gamesPlayed: 0, wins: 0, losses: 0 }];
       });
     } else if (status === "out") {
+      removeAttendanceLog(memberId);
+      setCheckinlog((prev) => prev.filter((c) => !(c.memberId === memberId && c.date === today)));
       setPlayers((p) => p.filter((x) => x.id !== memberId));
     }
   }
