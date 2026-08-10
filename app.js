@@ -6,6 +6,14 @@ function uid() {
   return Math.random().toString(36).slice(2, 9);
 }
 
+// 경기 시작할 때 팀 4명 중 한 명을 "점수 담당자"로 무작위 지정해요.
+// 관리자가 매번 승패를 물어보지 않아도, 담당자가 경기 끝나고 직접 점수를 기록하도록 하기 위함이에요.
+function pickScorer(teamA, teamB) {
+  const four = [...(teamA || []), ...(teamB || [])];
+  if (four.length === 0) return null;
+  return four[Math.floor(Math.random() * four.length)].id;
+}
+
 function todayStr() {
   // 주의: toISOString()은 UTC 기준이라 한국 시간 자정~오전 9시 사이엔 날짜가 하루 밀려서 나오는 버그가 있었어요.
   // 그래서 로컬(내 폰) 시간 기준으로 직접 조립해요.
@@ -461,13 +469,6 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
         <div className="p-5">
           <div className="flex justify-between items-start mb-3">
             <div className="flex items-center gap-3">
-              <div className="w-16 h-16 rounded-full bg-stone-100 flex items-center justify-center overflow-hidden shrink-0">
-                {member.photoUrl ? (
-                  <img src={member.photoUrl} className="w-full h-full object-cover" alt={member.name} />
-                ) : (
-                  <span className="text-2xl">🏸</span>
-                )}
-              </div>
               <div>
                 <p className="text-lg font-bold text-stone-900">{member.name}</p>
                 <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
@@ -478,15 +479,6 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
             </div>
             <button onClick={onClose} className="text-stone-400 text-xl leading-none px-1">✕</button>
           </div>
-
-          {canEdit && (
-            <div className="mb-3">
-              <label className="text-[11px] text-stone-400 underline underline-offset-2 cursor-pointer">
-                📸 프로필 사진 {uploading ? "업로드 중..." : "바꾸기"}
-                <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} disabled={uploading} />
-              </label>
-            </div>
-          )}
 
           {edit ? (
             <div className="space-y-2 mb-4">

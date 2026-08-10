@@ -974,13 +974,6 @@ function App() {
     } else if (status === "out") {
       setPlayers((p) => p.filter((x) => x.id !== memberId));
     }
-    // 관리자가 여기서 참석자로 체크하면, 일정에도 그 사람 이름이 뜨고 참석 기록/통계가 같이 반영돼요.
-    // (이제 참석 등록은 이 관리자 체크가 유일한 경로예요 — 회원이 직접 체크하는 기능은 없어요.)
-    const todayEvent = schedule.find((s) => s.date === todayStr());
-    if (todayEvent) {
-      const m = roster.find((r) => r.id === memberId);
-      setRsvpFor(todayEvent, status === "in" ? "in" : "out", memberId, m ? m.name : "?");
-    }
   }
 
   function toggleRestWish(memberId) {
@@ -1291,7 +1284,7 @@ function App() {
         // 팀을 나눌 때는 최근 파트너/상대 겹침을 피하는 쪽으로 똑똑하게 골라요.
         const four = pool.slice(0, 4);
         const { a, b } = splitScore(four, matchCtx);
-        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), scorerId: pickScorer(a, b) };
         const next = { ...current, [courtNum]: match };
         tx.set(REFS.courtmatches, { data: next });
         return { ok: true };
@@ -1459,7 +1452,7 @@ function App() {
     }
     const four = pickFourForCourt();
     const { a, b } = splitScore(four, matchCtx);
-    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), scorerId: pickScorer(a, b) };
     persistCourtMatches(courtNum, match);
     if (matchMode === "skill") persistMatchSettings({ skillRankOffset: skillRankOffset + 1 });
     setMatchSeq((n) => n + 1);
@@ -1510,7 +1503,7 @@ function App() {
     } else {
       ({ a, b } = splitScore(four, matchCtx));
     }
-    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), scorerId: pickScorer(a, b) };
     persistCourtMatches(courtNum, match);
     setMatchSeq((n) => n + 1);
     setManualCourt(null);
@@ -1553,7 +1546,7 @@ function App() {
     // 남은 조합들 중에서 골라요 — 그래도 다 똑같으면(사실상 조합이 하나뿐일 때) 무작위로라도 하나 골라요.
     const currentKey = `${four[0].id}|${four[1].id}`;
     const { a, b } = splitScore(four, matchCtx, currentKey);
-    const match = { ...m, teamA: a, teamB: b, scoreA: "", scoreB: "", winnerOverride: null };
+    const match = { ...m, teamA: a, teamB: b, scoreA: "", scoreB: "", winnerOverride: null, scorerId: pickScorer(a, b) };
     persistCourtMatches(courtNum, match);
   }
 
@@ -1683,7 +1676,7 @@ function App() {
 
     // 미리 정해둔 "다음 경기"가 있으면, 끝나자마자 바로 그 매칭으로 시작해요. 없으면 예전처럼 빈 코트로 남아요.
     const nextCourtState = m.next
-      ? { id: uid(), court: courtNum, teamA: m.next.teamA, teamB: m.next.teamB, scoreA: "", scoreB: "", done: false, date: todayStr() }
+      ? { id: uid(), court: courtNum, teamA: m.next.teamA, teamB: m.next.teamB, scoreA: "", scoreB: "", done: false, date: todayStr(), scorerId: pickScorer(m.next.teamA, m.next.teamB) }
       : finished;
     persistCourtMatches(courtNum, nextCourtState);
     markWaiting([...m.teamA, ...m.teamB].map((p) => p.id)); // 방금 끝난 사람들은 지금부터 대기 시작
@@ -1767,11 +1760,12 @@ function App() {
                       <button
                         key={m.id}
                         onClick={() => toggleAttend(m)}
-                        className={`px-3 py-1.5 rounded-full text-sm border transition ${
+                        className={`px-3 py-1.5 rounded-full text-sm border transition tap-scale ${
                           attending
-                            ? "bg-[var(--bc-blue)] text-[var(--bc-navy)] border-[var(--bc-blue)]"
+                            ? "text-white border-transparent"
                             : "bg-stone-50 text-stone-500 border-stone-200"
                         }`}
+                        style={attending ? { backgroundColor: "var(--bc-navy)" } : {}}
                       >
                         {m.name}
                       </button>
@@ -2250,6 +2244,8 @@ function App() {
             const isManualHere = manualCourt === courtNum;
             const aWinDone = m && m.done && Number(m.scoreA) > Number(m.scoreB);
             const bWinDone = m && m.done && Number(m.scoreB) > Number(m.scoreA);
+            const scorer = m ? [...m.teamA, ...m.teamB].find((p) => p.id === m.scorerId) : null;
+            const canRecord = m ? (adminOn || (!!myId && m.scorerId === myId)) : false;
             return (
               <div key={courtNum} className="rise-in bc-card overflow-hidden">
                 <div className="px-4 py-2.5 flex justify-between items-center" style={{ background: "linear-gradient(135deg, #223A5E 0%, #16233D 100%)" }}>
@@ -2341,9 +2337,14 @@ function App() {
                       </div>
                     </div>
                     <p className="text-center text-[10px] text-stone-400 -mt-2 mb-1">VS</p>
+                    {scorer && !m.done && (
+                      <p className="text-center text-[11px] font-semibold mb-2" style={{ color: "var(--bc-navy)" }}>
+                        📝 점수 담당: {scorer.name}{canRecord ? " (나)" : ""}
+                      </p>
+                    )}
                     <div className="flex items-center justify-center gap-3 pb-4">
                       <input
-                        disabled={m.done}
+                        disabled={m.done || !canRecord}
                         value={m.scoreA}
                         onChange={(e) => updateScore(courtNum, "scoreA", e.target.value)}
                         inputMode="numeric"
@@ -2352,7 +2353,7 @@ function App() {
                       />
                       <span className="text-stone-400">:</span>
                       <input
-                        disabled={m.done}
+                        disabled={m.done || !canRecord}
                         value={m.scoreB}
                         onChange={(e) => updateScore(courtNum, "scoreB", e.target.value)}
                         inputMode="numeric"
@@ -2361,6 +2362,7 @@ function App() {
                       />
                     </div>
                     {!m.done ? (
+                      canRecord ? (
                       <div className="px-4 pb-4 space-y-2">
                         {/* 점수 입력이 귀찮으면, 승리팀만 골라도 경기를 끝낼 수 있어요 */}
                         <div className="flex gap-2">
@@ -2394,6 +2396,7 @@ function App() {
                               }팀 승리)`
                             : "경기 종료"}
                         </button>
+
 
                         {/* 🔜 다음 경기 미리 정하기 — 지금 경기가 끝나길 기다리지 않고, 다음 경기 멤버를 미리 정해둘 수 있어요 */}
                         {m.next ? (
@@ -2494,6 +2497,11 @@ function App() {
                           </div>
                         )}
                       </div>
+                      ) : (
+                        <div className="px-4 pb-4">
+                          <p className="text-xs text-center text-stone-400">🙋 경기가 끝나면 <b style={{ color: "var(--bc-navy)" }}>{scorer ? scorer.name : "담당자"}</b>님이 점수를 기록할 거예요.</p>
+                        </div>
+                      )
                     ) : meetingEndedToday ? (
                       <div className="px-4 pb-4">
                         <p className="text-xs text-stone-400 text-center">🏁 오늘 모임이 종료됐어요.</p>
@@ -2652,7 +2660,6 @@ function App() {
                 {/* 예시 이미지와 동일한 구성: 프로필 헤더 + 경기요약/최근경기 2단 + 최근5경기 + 더보기 */}
                 <div className="bc-card overflow-hidden">
                   <div className="p-4 flex items-center gap-3.5 border-b" style={{ borderColor: "var(--bc-line)" }}>
-                    <Avatar name={myMember ? myMember.name : "나"} size={56} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-lg font-bold text-stone-800 truncate">{myMember ? myMember.name : "나"}</p>
