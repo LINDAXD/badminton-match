@@ -439,7 +439,7 @@ function App() {
           {/* 일정 (기존 메뉴) */}
           <MenuGrid
             items={[
-              { key: "schedule", emoji: "🗓️", mascotSlot: "buddy-schedule", title: "일정", subtitle: "참석 체크·출석왕", onClick: () => setActiveView("schedule") },
+              { key: "schedule", emoji: "🗓️", mascotSlot: "buddy-schedule", title: "일정", subtitle: "일정·출석왕", onClick: () => setActiveView("schedule") },
               { key: "members", emoji: "👥", title: "회원", subtitle: "전체 회원 명단 보기", onClick: () => { window.location.href = "./members.html"; } },
               ...(adminOn ? [{ key: "admin", emoji: "🛠️", title: "관리자 전용", subtitle: "회원 관리", onClick: () => setActiveView("admin") }] : []),
             ]}
@@ -556,7 +556,6 @@ function App() {
                 .filter((s) => showPastSchedule || s.date >= todayStr())
                 .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""))).map((s) => {
                 const rsvpList = s.rsvp || [];
-                const myStatus = myId ? (rsvpList.find((r) => r.id === myId) || {}).status : null;
                 const inList = rsvpList.filter((r) => r.status === "in").sort((a, b) => a.at - b.at);
                 const maybeList = rsvpList.filter((r) => r.status === "maybe");
                 const capacity = s.capacity;
@@ -592,30 +591,9 @@ function App() {
                     {maybeList.length > 0 && (
                       <p className="text-[11px] text-stone-400 mt-0.5">미정: {maybeList.map((a) => a.name).join(", ")}</p>
                     )}
-
-                    <div className="flex gap-1.5 mt-2.5">
-                      <button
-                        onClick={() => setRsvpFor(s, "in", myId, myName)}
-                        className={`flex-1 text-xs font-semibold py-1.5 rounded-lg border tap-scale ${myStatus === "in" ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
-                        style={myStatus === "in" ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
-                      >
-                        ✅ 참석
-                      </button>
-                      <button
-                        onClick={() => setRsvpFor(s, "maybe", myId, myName)}
-                        className={`flex-1 text-xs font-semibold py-1.5 rounded-lg border tap-scale ${myStatus === "maybe" ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
-                        style={myStatus === "maybe" ? { backgroundColor: "#FFD54F", color: "#5c4a00" } : {}}
-                      >
-                        ❓ 미정
-                      </button>
-                      <button
-                        onClick={() => setRsvpFor(s, "out", myId, myName)}
-                        className={`flex-1 text-xs font-semibold py-1.5 rounded-lg border tap-scale ${myStatus === "out" ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
-                        style={myStatus === "out" ? { backgroundColor: "#dc2626" } : {}}
-                      >
-                        ❌ 불참
-                      </button>
-                    </div>
+                    {confirmed.length === 0 && waitlist.length === 0 && maybeList.length === 0 && (
+                      <p className="text-[11px] text-stone-300 mt-1">아직 등록된 참석자가 없어요. 관리자가 참석자를 등록하면 여기 표시돼요.</p>
+                    )}
                   </li>
                 );
               })}

@@ -242,11 +242,10 @@ function todayScheduleAttendees(scheduleItems) {
   return [...seen.values()];
 }
 
-// 일정(RSVP)으로 참석 잡힌 사람 + 관리자가 매칭 페이지 "참석자 관리"에서 직접 체크인시킨 사람(checkinlog에 오늘 날짜로 찍힌 사람)을 합쳐요.
-// 체크인 경로가 두 개(일정 RSVP / 관리자 직접 체크인)라서, 한쪽만 보면 실제로 참석했는데도 "참석자 아님"으로 잘못 판단되는 경우가 있었어요.
+// 오늘 참석자 = 관리자가 매칭 페이지 "참석자 관리"에서 등록한 사람(checkinlog에 오늘 날짜로 찍힌 사람)만 기준으로 해요.
+// (예전엔 회원이 직접 일정에서 참석 체크를 했지만, 이제는 참석 등록을 관리자만 해요.)
 function combinedTodayAttendees(scheduleItems, checkinlog, roster) {
   const map = new Map();
-  todayScheduleAttendees(getEffectiveAttendanceEvents(scheduleItems)).forEach((a) => map.set(a.id, a));
   const today = todayStr();
   (checkinlog || []).forEach((c) => {
     if (c.date !== today || map.has(c.memberId)) return;
