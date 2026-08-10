@@ -106,7 +106,7 @@ body {
    ================================================================== */
 :root {
   /* ===== Birdie 최종 컬러 시스템: 화이트/배경 70% + 네이비 20% + 청록 10% ===== */
-  --bc-bg: #F6F9FC;         /* Background — 앱 전체 배경 */
+  --bc-bg: #EAF0F6;         /* Background — 앱 전체 배경 (카드 흰색과 명도차를 벌려 카드가 떠 보이지 않게) */
   --bc-navy: #1E3A5F;       /* Deep Navy — 메인 브랜드, 제목, 주요 텍스트, 일반 버튼 */
   --bc-navy-2: #2C4A6E;     /* Blue Navy — 보조 버튼, 아이콘, 그래프, TEAM B */
   --bc-blue: #00B8D9;       /* Birdie Cyan — 핵심 CTA, 선택, 강조 (쨍하게, 필요한 곳에서만) */
@@ -127,10 +127,13 @@ body {
   background: #FFFFFF;
   border: 1px solid var(--bc-line);
   border-radius: 16px;
-  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
+  /* 가까운 그림자(윤곽) + 먼 그림자(입체감) 두 겹으로 카드가 배경에 눌려 있는 느낌을 줌 */
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.06),
+    0 8px 20px -6px rgba(30, 58, 95, 0.12);
 }
 
-/* page background: 살짝 밝은 회색으로 카드가 뜨 보이게 */
+/* page background */
 .bc-page-bg { background: var(--bc-bg); }
 
 /* 손가락으로 누르기 편한 주요 액션 버튼 (44px+) */
