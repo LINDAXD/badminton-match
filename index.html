@@ -445,13 +445,9 @@ function App() {
                 {new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" })}
               </p>
             </div>
-            {myId ? (
+            {myId && (
               <button onClick={logout} className="tap-scale text-[11px] font-semibold px-3 py-1.5 rounded-full shrink-0 border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
                 로그아웃
-              </button>
-            ) : (
-              <button onClick={() => setShowLoginModal(true)} className="tap-scale text-sm font-bold px-4 py-2 rounded-full shrink-0" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}>
-                🔑 로그인
               </button>
             )}
           </div>
@@ -474,13 +470,27 @@ function App() {
           ) : myId ? (
             <p className="text-[13px] text-stone-500">오늘도 같이 뛰어요, 우리 버디 🏸</p>
           ) : (
-            <button
-              onClick={() => setShowLoginModal(true)}
-              className="tap-scale w-full text-center text-sm font-bold py-3 rounded-2xl"
-              style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}
-            >
-              이름으로 입장하기 →
-            </button>
+            <>
+              <div className="rounded-2xl p-3.5 grid grid-cols-2 gap-2 text-center mb-3" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
+                <div>
+                  <p className="headfont text-xl" style={{ color: "var(--bc-navy)" }}>{roster.length}</p>
+                  <p className="text-[10px] text-stone-500">함께하는 멤버</p>
+                </div>
+                <div>
+                  <p className="headfont text-xl" style={{ color: "var(--bc-navy)" }}>
+                    {upcomingList.length > 0 ? fmtDate(upcomingList[0].date) : "미정"}
+                  </p>
+                  <p className="text-[10px] text-stone-500">다음 모임</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowLoginModal(true)}
+                className="tap-scale w-full text-center text-sm font-bold py-3 rounded-2xl"
+                style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}
+              >
+                이름으로 입장하기 →
+              </button>
+            </>
           )}
 
           {myId && isRealToday && attendCount > 0 && nextUp.length > 0 && (
@@ -489,10 +499,10 @@ function App() {
         </div>
 
         <div className="flex gap-2 justify-center mt-4">
-          <a href="./more.html#create" className="tap-scale flex-1 text-center text-[var(--bc-navy)] text-sm font-bold px-6 py-3.5 rounded-2xl" style={{ backgroundColor: "var(--bc-blue)" }}>
+          <a href="./more.html#create" className="tap-scale flex-1 text-center text-sm font-semibold px-6 py-3 rounded-2xl border" style={{ borderColor: "var(--bc-blue-line)", color: "var(--bc-navy)", backgroundColor: "var(--bc-blue-soft)" }}>
             ➕ 모임 만들기
           </a>
-          <a href="./match.html" className="tap-scale flex-1 text-center text-sm font-bold px-6 py-3.5 rounded-2xl border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
+          <a href="./match.html" className="tap-scale flex-1 text-center text-sm font-semibold px-6 py-3 rounded-2xl border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
             🎲 랜덤매칭
           </a>
         </div>
@@ -647,36 +657,6 @@ function App() {
                   <p className="text-[10px] text-stone-400">{isRealToday ? "오늘 참석" : "참석 예정"}</p>
                 </div>
               </div>
-
-              {myId && (() => {
-                const s = upcomingList[0];
-                const myStatus = (s.rsvp || []).find((r) => r.id === myId)?.status || null;
-                return (
-                  <div className="grid grid-cols-3 gap-2 mt-3">
-                    <button
-                      onClick={() => setRsvpFor(s, "in", myId, myName)}
-                      className={`text-xs font-semibold py-2 rounded-xl tap-scale ${myStatus === "in" ? "text-white" : "bg-stone-50 text-stone-500 border border-stone-200"}`}
-                      style={myStatus === "in" ? { backgroundColor: "var(--bc-blue)" } : {}}
-                    >
-                      ✅ 참석
-                    </button>
-                    <button
-                      onClick={() => setRsvpFor(s, "maybe", myId, myName)}
-                      className={`text-xs font-semibold py-2 rounded-xl tap-scale ${myStatus === "maybe" ? "text-white" : "bg-stone-50 text-stone-500 border border-stone-200"}`}
-                      style={myStatus === "maybe" ? { backgroundColor: "#B98900" } : {}}
-                    >
-                      ❓ 미정
-                    </button>
-                    <button
-                      onClick={() => setRsvpFor(s, "out", myId, myName)}
-                      className={`text-xs font-semibold py-2 rounded-xl tap-scale ${myStatus === "out" ? "text-white" : "bg-stone-50 text-stone-500 border border-stone-200"}`}
-                      style={myStatus === "out" ? { backgroundColor: "#C0392B" } : {}}
-                    >
-                      ❌ 불참
-                    </button>
-                  </div>
-                );
-              })()}
 
               <div className="mt-3 pt-3 border-t border-stone-100">
                 {attendingMembers.length === 0 ? (
