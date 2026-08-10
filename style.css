@@ -19,8 +19,8 @@ body {
 }
 
 /* brand palette helpers (Tailwind arbitrary-value friendly, but keep plain classes too) */
-.bc-green { color: #2563EB; }
-.bc-bg-green { background-color: #2563EB; }
+.bc-green { color: #9BCB3B; }
+.bc-bg-green { background-color: #9BCB3B; }
 .bc-yellow { color: #FFD54F; }
 .bc-bg-yellow { background-color: #FFD54F; }
 
@@ -83,7 +83,7 @@ body {
   white-space: nowrap;
 }
 .bc-bottomnav .active {
-  color: #2563EB;
+  color: var(--bc-blue);
   font-weight: 700;
 }
 .bc-bottomnav .icon {
@@ -105,15 +105,17 @@ body {
    - 터치 영역 44px+ 확보
    ================================================================== */
 :root {
-  --bc-navy: #16233D;
-  --bc-blue: #2563EB;
-  --bc-blue-soft: #EAF1FF;
-  --bc-blue-line: #D5E3FF;
-  --bc-orange: #EA580C;
-  --bc-orange-soft: #FFF2E7;
-  --bc-orange-line: #FBDCC0;
-  --bc-line: #E7E9EE;
-  --bc-sub: #7C8494;
+  /* ===== Birdie 컬러 시스템: 화이트/연회색 70% + 네이비 20% + 라임 10% ===== */
+  --bc-navy: #172B3A;       /* 메인 네이비 — 제목, 아이콘, 텍스트 */
+  --bc-blue: #9BCB3B;       /* 메인 포인트(라임) — 주요 버튼, 선택 상태 */
+  --bc-lime-cta: #B7E600;   /* 슈퍼 CTA — Birdie에서 제일 중요한 행동(자동 매칭 시작 등)에만 */
+  --bc-blue-soft: #F4F8EC;  /* 라임 계열의 아주 옅은 배경(본인 강조 카드 등) — 절대 큰 면적에 진한 라임 쓰지 않기 */
+  --bc-blue-line: #DCEAC0;
+  --bc-orange: #3E5568;     /* B팀 색 — 오렌지 대신 네이비 계열 톤으로 통일 */
+  --bc-orange-soft: #EEF1F3;
+  --bc-orange-line: #D8DEE3;
+  --bc-line: #E6E9EC;       /* 카드/입력창 테두리 */
+  --bc-sub: #71808C;        /* 보조 글자(설명, 날짜, 비활성) */
 }
 
 /* bc-card was referenced everywhere but never defined — this was the
@@ -127,7 +129,7 @@ body {
 }
 
 /* page background: 살짝 밝은 회색으로 카드가 뜨 보이게 */
-.bc-page-bg { background: #F5F7FA; }
+.bc-page-bg { background: var(--bc-bg, #F7F8FA); }
 
 /* 손가락으로 누르기 편한 주요 액션 버튼 (44px+) */
 .bc-btn-lg {
@@ -142,13 +144,17 @@ body {
   transition: transform 0.12s ease, filter 0.12s ease;
 }
 .bc-btn-lg:active { transform: scale(0.98); }
-.bc-btn-primary { background: var(--bc-blue); color: #fff; }
+.bc-btn-primary { background: var(--bc-blue); color: var(--bc-navy); }
 .bc-btn-primary:disabled { background: #E5E7EB; color: #ABB1BC; }
 
-/* 팀 A / 팀 B 파스텔 대비 카드 */
+/* 슈퍼 CTA — Birdie에서 제일 중요한 행동에만 (예: 자동 매칭 시작) */
+.bc-btn-cta { background: var(--bc-lime-cta); color: var(--bc-navy); font-weight: 800; }
+.bc-btn-cta:disabled { background: #E5E7EB; color: #ABB1BC; }
+
+/* 팀 A / 팀 B — 오렌지 대신 라임/네이비 계열로 통일 */
 .bc-team-a { background: var(--bc-blue-soft); border: 1px solid var(--bc-blue-line); }
 .bc-team-b { background: var(--bc-orange-soft); border: 1px solid var(--bc-orange-line); }
-.bc-team-label-a { color: var(--bc-blue); }
+.bc-team-label-a { color: var(--bc-navy); }
 .bc-team-label-b { color: var(--bc-orange); }
 
 /* 상태 배지 */
