@@ -730,14 +730,14 @@ function App() {
                   <span className="bc-badge2 bc-badge2-playing">🟢 게임 진행 중</span>
                 </div>
                 <div className="px-4 pt-4 pb-4">
-                  <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-blue)" }}>
-                    <p className="text-[10px] font-bold tracking-widest mb-1 text-white/80">🔵 A팀</p>
+                  <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-navy)" }}>
+                    <p className="text-[10px] font-bold tracking-widest mb-1 text-white/70">A팀</p>
                     <p className="text-base font-bold text-white">나{myCourtInfo.teammate && <> · {myCourtInfo.teammate}</>}</p>
                   </div>
                   <p className="text-center text-xs text-stone-400 my-1.5 font-bold">VS</p>
-                  <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-orange)" }}>
-                    <p className="text-[10px] font-bold tracking-widest mb-1 text-white/80">🟠 B팀</p>
-                    <p className="text-base font-bold text-white">{myCourtInfo.opponents.join(" · ")}</p>
+                  <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
+                    <p className="text-[10px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-blue)" }}>B팀</p>
+                    <p className="text-base font-bold" style={{ color: "var(--bc-blue)" }}>{myCourtInfo.opponents.join(" · ")}</p>
                   </div>
                   <a href="./match.html" className="bc-btn-lg mt-3 w-full text-sm border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
                     매칭 화면에서 보기 →

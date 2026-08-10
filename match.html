@@ -2022,14 +2022,14 @@ function App() {
                     <p className="text-[11px] font-bold text-stone-400 mb-2">🏸 다음 게임</p>
                     <div className="rounded-2xl p-4" style={{ backgroundColor: "var(--bc-navy)" }}>
                       <p className="headfont text-3xl text-white text-center mb-3">{matchEndSummary.court}<span className="text-base font-normal opacity-70"> 코트</span></p>
-                      <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-blue)" }}>
-                        <p className="text-[10px] font-bold tracking-widest mb-1 text-white/80">🔵 A팀</p>
-                        <p className="text-base font-bold text-white">{liveMatch.teamA.map((p) => p.name).join(" · ")}</p>
+                      <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "#FFFFFF" }}>
+                        <p className="text-[10px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-sub)" }}>A팀</p>
+                        <p className="text-base font-bold" style={{ color: "var(--bc-navy)" }}>{liveMatch.teamA.map((p) => p.name).join(" · ")}</p>
                       </div>
                       <p className="text-center text-xs text-white/50 my-1.5 font-bold">VS</p>
-                      <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-orange)" }}>
-                        <p className="text-[10px] font-bold tracking-widest mb-1 text-white/80">🟠 B팀</p>
-                        <p className="text-base font-bold text-white">{liveMatch.teamB.map((p) => p.name).join(" · ")}</p>
+                      <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
+                        <p className="text-[10px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-blue)" }}>B팀</p>
+                        <p className="text-base font-bold" style={{ color: "var(--bc-blue)" }}>{liveMatch.teamB.map((p) => p.name).join(" · ")}</p>
                       </div>
                     </div>
                     <p className="text-center text-sm font-bold mt-3 text-stone-700">👉 {matchEndSummary.court}코트로 이동해주세요!</p>
@@ -2082,14 +2082,14 @@ function App() {
                     </span>
                   </div>
                   <div className="px-4 pt-4 pb-4">
-                    <div className="rounded-xl p-3.5 text-center" style={{ backgroundColor: "var(--bc-blue)" }}>
-                      <p className="text-[11px] font-bold tracking-widest mb-1 text-white/80">🔵 A팀</p>
+                    <div className="rounded-xl p-3.5 text-center" style={{ backgroundColor: "var(--bc-navy)" }}>
+                      <p className="text-[11px] font-bold tracking-widest mb-1 text-white/70">A팀</p>
                       <p className="text-lg font-bold leading-snug text-white">나{myStatus.teammate && <> · {myStatus.teammate}</>}</p>
                     </div>
                     <p className="text-center text-xs text-stone-400 my-2 font-bold">VS</p>
-                    <div className="rounded-xl p-3.5 text-center" style={{ backgroundColor: "var(--bc-orange)" }}>
-                      <p className="text-[11px] font-bold tracking-widest mb-1 text-white/80">🟠 B팀</p>
-                      <p className="text-lg font-bold leading-snug text-white">{(myStatus.opponents || []).join(" · ") || "상대팀"}</p>
+                    <div className="rounded-xl p-3.5 text-center" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
+                      <p className="text-[11px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-blue)" }}>B팀</p>
+                      <p className="text-lg font-bold leading-snug" style={{ color: "var(--bc-blue)" }}>{(myStatus.opponents || []).join(" · ") || "상대팀"}</p>
                     </div>
                     <p className="text-center text-sm font-bold mt-3 text-stone-700">
                       {myStatus.type === "playing" ? `${myStatus.court}코트로 이동해주세요!` : `곧 ${myStatus.court}코트로 이동해주세요!`}
