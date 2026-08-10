@@ -140,7 +140,7 @@ function AppModalHost() {
           <button
             onClick={() => close(modal.type === "confirm" ? true : modal.type === "prompt" ? inputVal : true)}
             className="flex-1 rounded-lg py-2 text-sm font-semibold text-white"
-            style={{ backgroundColor: "#4CAF50" }}
+            style={{ backgroundColor: "#2563EB" }}
           >
             확인
           </button>
@@ -502,14 +502,14 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
                   {SOCIAL_TAGS.map((t) => (
                     <button key={t.key} onClick={() => toggleSocial(t.key)}
                       className={`text-xs px-2.5 py-1.5 rounded-full border ${social[t.key] ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                      style={social[t.key] ? { backgroundColor: "#4CAF50" } : {}}>
+                      style={social[t.key] ? { backgroundColor: "#2563EB" } : {}}>
                       {t.emoji} {t.label}
                     </button>
                   ))}
                 </div>
               </div>
               <div className="flex gap-2 pt-1">
-                <button onClick={save} className="flex-1 rounded-lg py-2 text-sm font-semibold text-white" style={{ backgroundColor: "#4CAF50" }}>저장</button>
+                <button onClick={save} className="flex-1 rounded-lg py-2 text-sm font-semibold text-white" style={{ backgroundColor: "#2563EB" }}>저장</button>
                 <button onClick={() => setEdit(false)} className="flex-1 rounded-lg py-2 text-sm font-semibold border border-stone-200 text-stone-500">취소</button>
               </div>
             </div>
@@ -633,7 +633,7 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
                       key={b.key}
                       onClick={() => toggleManualBadge(b.key)}
                       className={`text-xs px-2.5 py-1.5 rounded-full border tap-scale ${has ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                      style={has ? { backgroundColor: "#4CAF50" } : {}}
+                      style={has ? { backgroundColor: "#2563EB" } : {}}
                     >
                       {b.emoji} {b.label} {has ? "· 지급됨" : ""}
                     </button>
@@ -887,7 +887,7 @@ function RequireLogin({ myId, children }) {
       <a
         href="./index.html#login"
         className="text-white text-sm font-semibold px-6 py-2.5 rounded-full"
-        style={{ backgroundColor: "#4CAF50" }}
+        style={{ backgroundColor: "#2563EB" }}
       >
         🏠 홈으로 가서 입장하기
       </a>
@@ -920,7 +920,7 @@ function TopHeader({ title, subtitle }) {
   return (
     <header className="px-5 pt-6 pb-3 max-w-2xl mx-auto">
       <div className="min-w-0">
-        <a href="./index.html" className="headfont text-xs tracking-wide" style={{ color: "#4CAF50" }}>🏸 BIRDIE</a>
+        <a href="./index.html" className="headfont text-xs tracking-wide" style={{ color: "#2563EB" }}>🏸 BIRDIE</a>
         {title && <h1 className="headfont text-[26px] text-stone-900 mt-1.5 leading-tight">{title}</h1>}
         {subtitle && <p className="text-sm text-stone-400 mt-1">{subtitle}</p>}
       </div>
@@ -971,7 +971,7 @@ function ProgressBar({ value, max, color }) {
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
   return (
     <div className="bc-progress-track">
-      <div className="bc-progress-fill" style={{ width: `${pct}%`, backgroundColor: color || "#4CAF50" }} />
+      <div className="bc-progress-fill" style={{ width: `${pct}%`, backgroundColor: color || "#2563EB" }} />
     </div>
   );
 }

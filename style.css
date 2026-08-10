@@ -19,8 +19,8 @@ body {
 }
 
 /* brand palette helpers (Tailwind arbitrary-value friendly, but keep plain classes too) */
-.bc-green { color: #4CAF50; }
-.bc-bg-green { background-color: #4CAF50; }
+.bc-green { color: #2563EB; }
+.bc-bg-green { background-color: #2563EB; }
 .bc-yellow { color: #FFD54F; }
 .bc-bg-yellow { background-color: #FFD54F; }
 
@@ -83,7 +83,7 @@ body {
   white-space: nowrap;
 }
 .bc-bottomnav .active {
-  color: #4CAF50;
+  color: #2563EB;
   font-weight: 700;
 }
 .bc-bottomnav .icon {
