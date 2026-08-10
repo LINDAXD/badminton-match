@@ -1625,14 +1625,14 @@ function App() {
 
     applySkillRatingUpdate(m, aWin);
 
-    // 경기 종료 요약을 잠깐 보여줘요
+    // 경기 종료 요약을 보여주고, 바로 이어서 다음 게임 매칭까지 안내해요 (수동으로 닫기 전까진 유지)
     setMatchEndSummary({
       court: courtNum,
+      matchId: m.id,
       teamA: m.teamA, teamB: m.teamB,
       scoreA: m.scoreA, scoreB: m.scoreB,
       hasScores, aWin,
     });
-    setTimeout(() => setMatchEndSummary((s) => (s && s.court === courtNum ? null : s)), 6000);
 
     const finished = { ...m, done: true };
     delete finished.next;
@@ -1974,22 +1974,78 @@ function App() {
 
       {tab === "match" && (
         <section className="px-5 mt-5 space-y-4">
-          {matchEndSummary && (
-            <div className="rounded-2xl p-4" style={{ backgroundColor: "#FFFBEA", border: "1px solid #FFD54F" }}>
-              <p className="text-sm font-bold mb-2" style={{ color: "#B98900" }}>🏸 코트 {matchEndSummary.court} 게임 종료</p>
-              <p className="text-sm text-stone-700">
-                🔵 {matchEndSummary.teamA[0].name}·{matchEndSummary.teamA[1].name}
-                {matchEndSummary.hasScores ? <> : {matchEndSummary.scoreA}점</> : null}
-              </p>
-              <p className="text-sm text-stone-700">
-                🔴 {matchEndSummary.teamB[0].name}·{matchEndSummary.teamB[1].name}
-                {matchEndSummary.hasScores ? <> : {matchEndSummary.scoreB}점</> : null}
-              </p>
-              <p className="text-sm font-semibold mt-1" style={{ color: "#1D4ED8" }}>
-                🏆 승리팀: {matchEndSummary.aWin ? `${matchEndSummary.teamA[0].name}·${matchEndSummary.teamA[1].name}` : `${matchEndSummary.teamB[0].name}·${matchEndSummary.teamB[1].name}`}
-              </p>
-            </div>
-          )}
+          {matchEndSummary && (() => {
+            const liveMatch = courtMatches[matchEndSummary.court];
+            const hasNext = liveMatch && !liveMatch.done && liveMatch.date === todayStr() && liveMatch.id !== matchEndSummary.matchId;
+            const isMatching = randomBusy === matchEndSummary.court;
+            const readyCount = waitingPlayers.length;
+            return (
+              <div className="bc-card overflow-hidden">
+                <div className="px-4 py-3 flex items-center justify-between" style={{ backgroundColor: "var(--bc-navy)" }}>
+                  <p className="text-white font-bold text-sm">🏸 {matchEndSummary.court}코트 게임 종료</p>
+                  <button onClick={() => setMatchEndSummary(null)} className="text-white/60 text-xs">✕ 닫기</button>
+                </div>
+                <div className="px-4 pt-3 pb-1">
+                  <p className="text-xs text-stone-500">
+                    🏆 승리팀 <b className="text-stone-800">
+                      {matchEndSummary.aWin ? `${matchEndSummary.teamA[0].name}·${matchEndSummary.teamA[1].name}` : `${matchEndSummary.teamB[0].name}·${matchEndSummary.teamB[1].name}`}
+                    </b>
+                    {matchEndSummary.hasScores && <> ({matchEndSummary.scoreA}:{matchEndSummary.scoreB})</>}
+                  </p>
+                </div>
+
+                {hasNext ? (
+                  /* ③ 다음 매칭 결과 — 크고 단순하게, 3초 안에 알 수 있도록 */
+                  <div className="px-4 pt-3 pb-4">
+                    <p className="text-[11px] font-bold text-stone-400 mb-2">🏸 다음 게임</p>
+                    <div className="rounded-2xl p-4" style={{ backgroundColor: "var(--bc-navy)" }}>
+                      <p className="headfont text-3xl text-white text-center mb-3">{matchEndSummary.court}<span className="text-base font-normal opacity-70"> 코트</span></p>
+                      <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-blue)" }}>
+                        <p className="text-[10px] font-bold tracking-widest mb-1 text-white/80">🔵 A팀</p>
+                        <p className="text-base font-bold text-white">{liveMatch.teamA.map((p) => p.name).join(" · ")}</p>
+                      </div>
+                      <p className="text-center text-xs text-white/50 my-1.5 font-bold">VS</p>
+                      <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-orange)" }}>
+                        <p className="text-[10px] font-bold tracking-widest mb-1 text-white/80">🟠 B팀</p>
+                        <p className="text-base font-bold text-white">{liveMatch.teamB.map((p) => p.name).join(" · ")}</p>
+                      </div>
+                    </div>
+                    <p className="text-center text-sm font-bold mt-3 text-stone-700">👉 {matchEndSummary.court}코트로 이동해주세요!</p>
+                    <a href="#court-list" className="bc-btn-lg mt-2 w-full text-sm border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
+                      전체 코트 현황 보기 ↓
+                    </a>
+                  </div>
+                ) : isMatching ? (
+                  /* ② 매칭 중 */
+                  <div className="px-4 pt-2 pb-5 text-center">
+                    <p className="text-2xl mb-2 animate-pulse">🏸</p>
+                    <p className="text-sm font-bold text-stone-700 mb-1">다음 게임 매칭 중...</p>
+                    <p className="text-xs text-stone-400">실력점수 · 대기시간 · 최근 파트너 · 최근 상대를 고려해서<br />팀을 구성하고 있어요. 잠시만요!</p>
+                  </div>
+                ) : (
+                  /* ① 매칭 준비 */
+                  <div className="px-4 pt-2 pb-4">
+                    <p className="text-xs text-stone-400 mb-3">참석 {players.length}명 · 코트 {numCourts}개</p>
+                    <div className="flex gap-2 mb-3">
+                      <span className="bc-badge2 bc-badge2-playing">🟢 게임 중 {occupiedIds.size}명</span>
+                      <span className="bc-badge2 bc-badge2-waiting">🟡 대기 {readyCount}명</span>
+                    </div>
+                    <button
+                      onClick={() => startRandomMatchAsMember(matchEndSummary.court)}
+                      disabled={readyCount < 4 || randomBusy}
+                      className="bc-btn-lg bc-btn-primary w-full text-sm disabled:opacity-40 disabled:bg-stone-200 disabled:text-stone-400"
+                    >
+                      🏸 다음 게임 자동 매칭
+                    </button>
+                    {readyCount < 4 && (
+                      <p className="text-[11px] text-stone-400 text-center mt-1.5">대기 인원이 {4 - readyCount}명 더 필요해요.</p>
+                    )}
+                    <p className="text-[11px] text-stone-400 text-center mt-2">현재 게임을 기록한 사람은 자동으로 다음 게임 대상에 포함돼요.</p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {myStatus && !meetingEndedToday && (
             <div className="bc-card overflow-hidden">
               {(myStatus.type === "playing" || myStatus.type === "queued") && (
