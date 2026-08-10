@@ -364,71 +364,72 @@ function App() {
 
   return (
     <div className="min-h-screen pb-24 font-sans" style={{ backgroundColor: "#FAFAF8", color: "#2A2A28" }}>
-      {/* top greeting card — Toss/당근 스타일: 인사말 + 날짜 + 오늘 현황을 한 초록 카드에 */}
+      {/* top greeting card — 흰 카드 + 얇은 네이비 포인트만, 화면 전체를 색으로 덮지 않게 */}
       <header className="px-5 pt-6 pb-5 max-w-2xl mx-auto">
-        <div className="rise-in rounded-[28px] p-5 text-white relative overflow-hidden" style={{ background: "linear-gradient(135deg, #223A5E 0%, #16233D 100%)" }}>
+        <div className="rise-in bc-card p-5 relative overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-1" style={{ backgroundColor: "var(--bc-navy)" }} />
           <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="headfont text-[22px] leading-tight">
+              <p className="headfont text-[22px] leading-tight text-stone-800">
                 {myId ? <>안녕하세요, {myName}님 👋</> : "혼자보다 함께, 버디"}
               </p>
-              <p className="text-[12px] mt-1" style={{ color: "rgba(255,255,255,0.85)" }}>
+              <p className="text-[12px] mt-1 text-stone-400">
                 {new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" })}
               </p>
             </div>
             {myId ? (
-              <button onClick={logout} className="tap-scale text-[11px] font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.18)" }}>
+              <button onClick={logout} className="tap-scale text-[11px] font-semibold px-3 py-1.5 rounded-full shrink-0 border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
                 로그아웃
               </button>
             ) : (
-              <button onClick={() => setShowLoginModal(true)} className="tap-scale text-sm font-bold px-4 py-2 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: "#ffffff", color: "#1D4ED8" }}>
+              <button onClick={() => setShowLoginModal(true)} className="tap-scale text-sm font-bold px-4 py-2 rounded-full shrink-0" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
                 🔑 로그인
               </button>
             )}
           </div>
 
           {myId && isRealToday && attendCount > 0 ? (
-            <div className="rounded-2xl p-3.5 grid grid-cols-3 gap-2 text-center" style={{ backgroundColor: "rgba(255,255,255,0.14)" }}>
+            <div className="rounded-2xl p-3.5 grid grid-cols-3 gap-2 text-center" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
               <div>
-                <p className="headfont text-xl">{attendCount}</p>
-                <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.8)" }}>오늘 참석</p>
+                <p className="headfont text-xl" style={{ color: "var(--bc-navy)" }}>{attendCount}</p>
+                <p className="text-[10px] text-stone-500">오늘 참석</p>
               </div>
               <div>
-                <p className="headfont text-xl">{activeCourts}</p>
-                <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.8)" }}>코트 운영중</p>
+                <p className="headfont text-xl" style={{ color: "var(--bc-navy)" }}>{activeCourts}</p>
+                <p className="text-[10px] text-stone-500">코트 운영중</p>
               </div>
               <div>
-                <p className="headfont text-xl">{waitingNow.length}</p>
-                <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.8)" }}>현재 대기</p>
+                <p className="headfont text-xl" style={{ color: "var(--bc-navy)" }}>{waitingNow.length}</p>
+                <p className="text-[10px] text-stone-500">현재 대기</p>
               </div>
             </div>
           ) : myId ? (
-            <p className="text-[13px]" style={{ color: "rgba(255,255,255,0.9)" }}>오늘도 같이 뛰어요, 우리 버디 🏸</p>
+            <p className="text-[13px] text-stone-500">오늘도 같이 뛰어요, 우리 버디 🏸</p>
           ) : (
             <button
               onClick={() => setShowLoginModal(true)}
-              className="tap-scale w-full text-center text-sm font-bold py-3 rounded-2xl shadow-sm"
-              style={{ backgroundColor: "#ffffff", color: "#1D4ED8" }}
+              className="tap-scale w-full text-center text-sm font-bold py-3 rounded-2xl"
+              style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}
             >
               이름으로 입장하기 →
             </button>
           )}
 
           {myId && isRealToday && attendCount > 0 && nextUp.length > 0 && (
-            <p className="text-[11px] mt-2.5" style={{ color: "rgba(255,255,255,0.85)" }}>🔜 다음 추천: {nextUp.map((p) => p.name).join(", ")}</p>
+            <p className="text-[11px] mt-2.5 text-stone-500">🔜 다음 추천: {nextUp.map((p) => p.name).join(", ")}</p>
           )}
         </div>
 
         <div className="flex gap-2 justify-center mt-4">
-          <a href="./more.html#create" className="tap-scale flex-1 text-center text-white text-sm font-bold px-6 py-3.5 rounded-2xl shadow-sm" style={{ backgroundColor: "#2563EB" }}>
+          <a href="./more.html#create" className="tap-scale flex-1 text-center text-white text-sm font-bold px-6 py-3.5 rounded-2xl" style={{ backgroundColor: "var(--bc-blue)" }}>
             ➕ 모임 만들기
           </a>
-          <a href="./match.html" className="tap-scale flex-1 text-center text-sm font-bold px-6 py-3.5 rounded-2xl border" style={{ borderColor: "#FFD54F", color: "#B98900", backgroundColor: "#FFFBEA" }}>
+          <a href="./match.html" className="tap-scale flex-1 text-center text-sm font-bold px-6 py-3.5 rounded-2xl border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
             🎲 랜덤매칭
           </a>
         </div>
         {myStatusText && (
-          <p className="text-xs mt-2.5 text-center" style={{ color: "#2563EB" }}>{myStatusText}</p>
+          <p className="text-xs mt-2.5 text-center" style={{ color: "var(--bc-blue)" }}>{myStatusText}</p>
         )}
       </header>
 
