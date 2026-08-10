@@ -1201,6 +1201,7 @@ function App() {
   // 회원용 랜덤 매칭 — 관리자 없이도 아무나 누를 수 있어요. 지금 안 뛰고 있는 사람 중에서만 완전 무작위로 4명을 뽑아요.
   // 여러 명이 동시에 눌러도 한 코트에 경기가 중복 생성되지 않도록 트랜잭션으로 안전하게 처리해요.
   const [randomBusy, setRandomBusy] = useState(null);
+  const [finishingCourt, setFinishingCourt] = useState(null); // 여러 명이 동시에 "경기 종료"를 눌러도 한 번만 기록되게
   const [editingCourt, setEditingCourt] = useState(null); // 진행 중인 경기에서 잘못 들어간 선수를 바꿀 때 사용
   const [expandedTools, setExpandedTools] = useState({}); // 코트별로 "더보기" 도구 모음이 펼쳐져 있는지
 
@@ -1594,10 +1595,12 @@ function App() {
 
   function finishMatch(courtNum) {
     const m = courtMatches[courtNum];
-    if (!m) return;
+    if (!m || m.done) return;
+    if (finishingCourt === courtNum) return; // 이미 처리 중이면 중복 실행 방지
+    setFinishingCourt(courtNum);
     const hasScores = m.scoreA !== "" && m.scoreB !== "" && m.scoreA !== m.scoreB;
     const hasWinnerPick = m.winnerOverride === "A" || m.winnerOverride === "B";
-    if (!hasScores && !hasWinnerPick) return;
+    if (!hasScores && !hasWinnerPick) { setFinishingCourt(null); return; }
     const aWin = hasScores ? Number(m.scoreA) > Number(m.scoreB) : m.winnerOverride === "A";
 
     setPlayers((ps) =>
@@ -1653,6 +1656,7 @@ function App() {
       : finished;
     persistCourtMatches(courtNum, nextCourtState);
     markWaiting([...m.teamA, ...m.teamB].map((p) => p.id)); // 방금 끝난 사람들은 지금부터 대기 시작
+    setFinishingCourt(null);
   }
 
 
@@ -2372,10 +2376,18 @@ function App() {
                         </div>
                         <button
                           onClick={() => finishMatch(courtNum)}
-                          disabled={!((m.scoreA !== "" && m.scoreB !== "" && m.scoreA !== m.scoreB) || m.winnerOverride === "A" || m.winnerOverride === "B")}
-                          className="bc-btn-lg w-full text-sm font-semibold bg-[#FFD54F] text-[#5c4a00] disabled:bg-stone-200 disabled:text-stone-400"
+                          disabled={finishingCourt === courtNum || !((m.scoreA !== "" && m.scoreB !== "" && m.scoreA !== m.scoreB) || m.winnerOverride === "A" || m.winnerOverride === "B")}
+                          className="bc-btn-lg bc-btn-primary w-full text-sm font-semibold disabled:opacity-40 disabled:bg-stone-200 disabled:text-stone-400"
                         >
-                          경기 종료
+                          {finishingCourt === courtNum
+                            ? "기록하는 중..."
+                            : (m.scoreA !== "" && m.scoreB !== "" && m.scoreA !== m.scoreB) || m.winnerOverride
+                            ? `✓ 결과 기록하기 (${
+                                m.scoreA !== "" && m.scoreB !== "" && m.scoreA !== m.scoreB
+                                  ? (Number(m.scoreA) > Number(m.scoreB) ? "A" : "B")
+                                  : m.winnerOverride
+                              }팀 승리)`
+                            : "경기 종료"}
                         </button>
 
                         {/* 🔜 다음 경기 미리 정하기 — 지금 경기가 끝나길 기다리지 않고, 다음 경기 멤버를 미리 정해둘 수 있어요 */}
@@ -2483,7 +2495,7 @@ function App() {
                       </div>
                     ) : !adminOn ? (
                       <div className="px-4 pb-4 space-y-2">
-                        <p className="text-xs text-stone-400 text-center">경기가 끝났어요.</p>
+                        <p className="text-xs text-center font-semibold" style={{ color: "#16A34A" }}>✓ 기록 완료</p>
                         {waitingPlayers.length < 4 && (
                           <p className="text-xs font-medium text-center" style={{ color: "#B98900" }}>
                             ⚠️ {4 - waitingPlayers.length}명이 더 필요해요 (대기 {waitingPlayers.length}명 / 4명)
@@ -2500,6 +2512,7 @@ function App() {
                       </div>
                     ) : !isManualHere ? (
                       <div className="px-4 pb-4 space-y-2">
+                        <p className="text-xs text-center font-semibold" style={{ color: "#16A34A" }}>✓ 기록 완료</p>
                         {waitingPlayers.length < 4 && (
                           <p className="text-xs font-medium text-center" style={{ color: "#B98900" }}>
                             ⚠️ {4 - waitingPlayers.length}명이 부족해요. (대기 {waitingPlayers.length}명 / 4명 필요)
