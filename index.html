@@ -346,7 +346,8 @@ function App() {
   const iAmInAttendanceSource = myId && attendingMembers.some((m) => m.id === myId);
   const myStatusText = !iAmInAttendanceSource ? null
     : isRealToday ? "✅ 오늘 참석으로 체크되어 있어요"
-    : `📅 ${fmtDate(attendanceSource[0].date)} 모임에 참석 예정이에요`;
+    : attendanceSource.length > 0 ? `📅 ${fmtDate(attendanceSource[0].date)} 모임에 참석 예정이에요`
+    : "✅ 참석으로 체크되어 있어요";
   const latestPhoto = reviews.find((r) => photosOf(r).length >= 3);
   function isFirstTimer(id) {
     return checkinlog.filter((c) => c.memberId === id).length <= 1;
