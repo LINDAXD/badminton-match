@@ -105,17 +105,19 @@ body {
    - 터치 영역 44px+ 확보
    ================================================================== */
 :root {
-  /* ===== Birdie 최종 컬러 시스템: 화이트/배경 70% + 네이비 20% + 그린 10% ===== */
-  --bc-navy: #172B3A;       /* Deep Navy — 제목, 숫자, 아이콘, 일반 버튼 */
-  --bc-blue: #00C853;       /* Birdie Green — 핵심 버튼, 선택 상태, 강조 (쨍하게, 필요한 곳에서만) */
-  --bc-lime-cta: #00C853;   /* 슈퍼 CTA도 동일한 Birdie Green (자동 매칭 시작 등) */
-  --bc-blue-soft: #E0F7E9;  /* Light Green — 선택 카드, 배지, 상태 배경 */
-  --bc-blue-line: #C9EED8;
-  --bc-orange: #172B3A;     /* TEAM A는 네이비 "정보색" — 배경보다 텍스트/아이콘 위주로 사용 */
+  /* ===== Birdie 최종 컬러 시스템: 화이트/배경 70% + 네이비 20% + 청록 10% ===== */
+  --bc-bg: #F6F9FC;         /* Background — 앱 전체 배경 */
+  --bc-navy: #1E3A5F;       /* Deep Navy — 메인 브랜드, 제목, 주요 텍스트, 일반 버튼 */
+  --bc-navy-2: #2C4A6E;     /* Blue Navy — 보조 버튼, 아이콘, 그래프, TEAM B */
+  --bc-blue: #00B8D9;       /* Birdie Cyan — 핵심 CTA, 선택, 강조 (쨍하게, 필요한 곳에서만) */
+  --bc-lime-cta: #00B8D9;   /* 슈퍼 CTA도 동일한 Birdie Cyan (자동 매칭 시작 등) */
+  --bc-blue-soft: #E0F7FA;  /* Light Cyan — 선택 카드, 배지, 상태 배경 */
+  --bc-blue-line: #B2E9F2;
+  --bc-orange: #1E3A5F;     /* TEAM A는 네이비 "정보색" — 배경보다 텍스트/아이콘 위주로 사용 */
   --bc-orange-soft: #F7F9F7;
-  --bc-orange-line: #E5EAE7;
-  --bc-line: #E5EAE7;       /* Border — 테두리, 구분선 */
-  --bc-sub: #68757D;        /* Secondary — 설명, 날짜, 보조 텍스트 */
+  --bc-orange-line: #E2E8F0;
+  --bc-line: #E2E8F0;       /* Border — 테두리, 구분선 */
+  --bc-sub: #718096;        /* Secondary — 설명, 날짜, 보조 텍스트 */
 }
 
 /* bc-card was referenced everywhere but never defined — this was the
@@ -129,7 +131,7 @@ body {
 }
 
 /* page background: 살짝 밝은 회색으로 카드가 뜨 보이게 */
-.bc-page-bg { background: var(--bc-bg, #F7F8FA); }
+.bc-page-bg { background: var(--bc-bg); }
 
 /* 손가락으로 누르기 편한 주요 액션 버튼 (44px+) */
 .bc-btn-lg {
@@ -153,9 +155,9 @@ body {
 
 /* 팀 A / 팀 B — 오렌지 대신 라임/네이비 계열로 통일 */
 .bc-team-a { background: var(--bc-orange-soft); border: 1px solid var(--bc-orange-line); }
-.bc-team-b { background: var(--bc-blue-soft); border: 1px solid var(--bc-blue-line); }
+.bc-team-b { background: var(--bc-orange-soft); border: 1px solid var(--bc-orange-line); }
 .bc-team-label-a { color: var(--bc-navy); }
-.bc-team-label-b { color: var(--bc-blue); }
+.bc-team-label-b { color: var(--bc-navy-2); }
 
 /* 상태 배지 */
 .bc-badge2 {
@@ -168,7 +170,7 @@ body {
   font-weight: 800;
   white-space: nowrap;
 }
-.bc-badge2-playing { background: #DCFCE7; color: #16A34A; }
+.bc-badge2-playing { background: var(--bc-blue-soft); color: var(--bc-blue); }
 .bc-badge2-waiting { background: #FEF3C7; color: #B45309; }
 .bc-badge2-empty { background: #F1F5F9; color: #7C8494; }
 .bc-badge2-done { background: #E7E9EE; color: #475569; }

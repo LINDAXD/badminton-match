@@ -2027,9 +2027,9 @@ function App() {
                         <p className="text-base font-bold" style={{ color: "var(--bc-navy)" }}>{liveMatch.teamA.map((p) => p.name).join(" · ")}</p>
                       </div>
                       <p className="text-center text-xs text-white/50 my-1.5 font-bold">VS</p>
-                      <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
-                        <p className="text-[10px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-blue)" }}>B팀</p>
-                        <p className="text-base font-bold" style={{ color: "var(--bc-blue)" }}>{liveMatch.teamB.map((p) => p.name).join(" · ")}</p>
+                      <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-orange-soft)" }}>
+                        <p className="text-[10px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-navy-2)" }}>B팀</p>
+                        <p className="text-base font-bold" style={{ color: "var(--bc-navy-2)" }}>{liveMatch.teamB.map((p) => p.name).join(" · ")}</p>
                       </div>
                     </div>
                     <p className="text-center text-sm font-bold mt-3 text-stone-700">👉 {matchEndSummary.court}코트로 이동해주세요!</p>
@@ -2087,9 +2087,9 @@ function App() {
                       <p className="text-lg font-bold leading-snug text-white">나{myStatus.teammate && <> · {myStatus.teammate}</>}</p>
                     </div>
                     <p className="text-center text-xs text-stone-400 my-2 font-bold">VS</p>
-                    <div className="rounded-xl p-3.5 text-center" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
-                      <p className="text-[11px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-blue)" }}>B팀</p>
-                      <p className="text-lg font-bold leading-snug" style={{ color: "var(--bc-blue)" }}>{(myStatus.opponents || []).join(" · ") || "상대팀"}</p>
+                    <div className="rounded-xl p-3.5 text-center" style={{ backgroundColor: "var(--bc-orange-soft)" }}>
+                      <p className="text-[11px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-navy-2)" }}>B팀</p>
+                      <p className="text-lg font-bold leading-snug" style={{ color: "var(--bc-navy-2)" }}>{(myStatus.opponents || []).join(" · ") || "상대팀"}</p>
                     </div>
                     <p className="text-center text-sm font-bold mt-3 text-stone-700">
                       {myStatus.type === "playing" ? `${myStatus.court}코트로 이동해주세요!` : `곧 ${myStatus.court}코트로 이동해주세요!`}
@@ -2331,7 +2331,7 @@ function App() {
                   <>
                     <div className="grid grid-cols-2 gap-2 px-4 py-4">
                       <div className={`bc-team-a rounded-xl p-3 ${aWinDone ? "ring-2 ring-offset-1" : ""}`} style={aWinDone ? { "--tw-ring-color": "var(--bc-blue)" } : {}}>
-                        <p className="bc-team-label-a text-[10px] font-bold tracking-widest mb-2 flex items-center gap-1">🔵 A팀 {aWinDone && <span>🏆</span>}</p>
+                        <p className="bc-team-label-a text-[10px] font-bold tracking-widest mb-2 flex items-center gap-1">⬛ A팀 {aWinDone && <span>🏆</span>}</p>
                         <div className="flex items-center gap-2 mb-1.5">
                           <Avatar name={m.teamA[0].name} size={26} />
                           <p className="text-sm font-semibold leading-tight truncate">{m.teamA[0].name}</p>
@@ -2342,7 +2342,7 @@ function App() {
                         </div>
                       </div>
                       <div className={`bc-team-b rounded-xl p-3 ${bWinDone ? "ring-2 ring-offset-1" : ""}`} style={bWinDone ? { "--tw-ring-color": "var(--bc-orange)" } : {}}>
-                        <p className="bc-team-label-b text-[10px] font-bold tracking-widest mb-2 flex items-center gap-1">🟠 B팀 {bWinDone && <span>🏆</span>}</p>
+                        <p className="bc-team-label-b text-[10px] font-bold tracking-widest mb-2 flex items-center gap-1">🔷 B팀 {bWinDone && <span>🏆</span>}</p>
                         <div className="flex items-center gap-2 mb-1.5">
                           <Avatar name={m.teamB[0].name} size={26} />
                           <p className="text-sm font-semibold leading-tight truncate">{m.teamB[0].name}</p>
@@ -2513,7 +2513,7 @@ function App() {
                       </div>
                     ) : !adminOn ? (
                       <div className="px-4 pb-4 space-y-2">
-                        <p className="text-xs text-center font-semibold" style={{ color: "#16A34A" }}>✓ 기록 완료</p>
+                        <p className="text-xs text-center font-semibold" style={{ color: "var(--bc-blue)" }}>✓ 기록 완료</p>
                         {waitingPlayers.length < 4 && (
                           <p className="text-xs font-medium text-center" style={{ color: "#B98900" }}>
                             ⚠️ {4 - waitingPlayers.length}명이 더 필요해요 (대기 {waitingPlayers.length}명 / 4명)
@@ -2530,7 +2530,7 @@ function App() {
                       </div>
                     ) : !isManualHere ? (
                       <div className="px-4 pb-4 space-y-2">
-                        <p className="text-xs text-center font-semibold" style={{ color: "#16A34A" }}>✓ 기록 완료</p>
+                        <p className="text-xs text-center font-semibold" style={{ color: "var(--bc-blue)" }}>✓ 기록 완료</p>
                         {waitingPlayers.length < 4 && (
                           <p className="text-xs font-medium text-center" style={{ color: "#B98900" }}>
                             ⚠️ {4 - waitingPlayers.length}명이 부족해요. (대기 {waitingPlayers.length}명 / 4명 필요)
@@ -2645,7 +2645,7 @@ function App() {
                     <div className="flex items-center gap-2">
                       <span
                         className="bc-badge2"
-                        style={won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
+                        style={won ? { backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-blue)" } : { backgroundColor: "var(--bc-orange-soft)", color: "var(--bc-sub)" }}
                       >
                         {won ? "🟢 승리" : "🔴 패배"}
                       </span>
@@ -2700,11 +2700,11 @@ function App() {
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-stone-500">승</span>
-                            <span className="text-sm font-bold" style={{ color: "#16A34A" }}>{s.wins}</span>
+                            <span className="text-sm font-bold" style={{ color: "var(--bc-blue)" }}>{s.wins}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-stone-500">패</span>
-                            <span className="text-sm font-bold" style={{ color: "#DC2626" }}>{s.losses}</span>
+                            <span className="text-sm font-bold" style={{ color: "var(--bc-sub)" }}>{s.losses}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-stone-500">승률</span>
@@ -2728,7 +2728,7 @@ function App() {
                                   <span className="text-xs text-stone-500">{shortDate}</span>
                                   <span
                                     className="bc-badge2"
-                                    style={won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
+                                    style={won ? { backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-blue)" } : { backgroundColor: "var(--bc-orange-soft)", color: "var(--bc-sub)" }}
                                   >
                                     {won ? "승리" : "패배"}
                                   </span>
@@ -2841,7 +2841,7 @@ function App() {
                           </div>
 
                           <div className="text-center mt-4">
-                            <p className="text-base font-bold" style={won ? { color: "#16A34A" } : { color: "#DC2626" }}>
+                            <p className="text-base font-bold" style={won ? { color: "var(--bc-blue)" } : { color: "var(--bc-sub)" }}>
                               {won ? "🏆 승리" : "🔴 패배"}
                             </p>
                             {hasScore && (
@@ -2854,7 +2854,7 @@ function App() {
                               <p className="text-[11px] text-stone-400 mb-1">경기 후 실력점수</p>
                               <p className="text-sm font-bold text-stone-700">
                                 {myDelta.before} → {myDelta.after}
-                                <span style={myDelta.after >= myDelta.before ? { color: "#16A34A" } : { color: "#DC2626" }}>
+                                <span style={myDelta.after >= myDelta.before ? { color: "var(--bc-blue)" } : { color: "var(--bc-sub)" }}>
                                   {" "}({myDelta.after >= myDelta.before ? "+" : ""}{myDelta.after - myDelta.before})
                                 </span>
                               </p>

@@ -431,7 +431,7 @@ function App() {
     : [];
 
   return (
-    <div className="min-h-screen pb-24 font-sans" style={{ backgroundColor: "#F7F8FA", color: "#2A2A28" }}>
+    <div className="min-h-screen pb-24 font-sans" style={{ backgroundColor: "var(--bc-bg)", color: "#2A2A28" }}>
       {/* top greeting card — 흰 카드 + 얇은 네이비 포인트만, 화면 전체를 색으로 덮지 않게 */}
       <header className="px-5 pt-6 pb-5 max-w-2xl mx-auto">
         <div className="rise-in bc-card p-5 relative overflow-hidden">
@@ -735,9 +735,9 @@ function App() {
                     <p className="text-base font-bold text-white">나{myCourtInfo.teammate && <> · {myCourtInfo.teammate}</>}</p>
                   </div>
                   <p className="text-center text-xs text-stone-400 my-1.5 font-bold">VS</p>
-                  <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
-                    <p className="text-[10px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-blue)" }}>B팀</p>
-                    <p className="text-base font-bold" style={{ color: "var(--bc-blue)" }}>{myCourtInfo.opponents.join(" · ")}</p>
+                  <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-orange-soft)" }}>
+                    <p className="text-[10px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-navy-2)" }}>B팀</p>
+                    <p className="text-base font-bold" style={{ color: "var(--bc-navy-2)" }}>{myCourtInfo.opponents.join(" · ")}</p>
                   </div>
                   <a href="./match.html" className="bc-btn-lg mt-3 w-full text-sm border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
                     매칭 화면에서 보기 →
@@ -821,7 +821,7 @@ function App() {
                     <span
                       key={m.id}
                       className="bc-badge2"
-                      style={m.won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
+                      style={m.won ? { backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-blue)" } : { backgroundColor: "var(--bc-orange-soft)", color: "var(--bc-sub)" }}
                     >
                       {m.won ? "승리" : "패배"}
                     </span>
