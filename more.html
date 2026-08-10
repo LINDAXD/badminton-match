@@ -363,7 +363,7 @@ function App() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-lg font-bold text-stone-800 truncate">{me ? me.name : myName}</p>
-                      <span className="bc-badge2" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}>
+                      <span className="bc-badge2" style={{ backgroundColor: "#FFFFFF", color: "var(--bc-navy)", border: "1.5px solid var(--bc-navy)" }}>
                         {myStage === "provisional0" ? "🆕 평가중" : myStage === "provisional1" ? "🟡 임시급수" : `${myTier}급`}
                       </span>
                     </div>
@@ -597,7 +597,7 @@ function App() {
                       <button
                         onClick={() => setRsvpFor(s, "in", myId, myName)}
                         className={`flex-1 text-xs font-semibold py-1.5 rounded-lg border tap-scale ${myStatus === "in" ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
-                        style={myStatus === "in" ? { backgroundColor: "var(--bc-blue)" } : {}}
+                        style={myStatus === "in" ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
                       >
                         ✅ 참석
                       </button>
@@ -643,7 +643,7 @@ function App() {
                 </select>
               </div>
               <p className="text-[11px] text-stone-400">정원을 채우면 그 다음 신청자는 자동으로 대기자로 표시돼요. 만든 모임은 관리자가 삭제할 수 있어요.</p>
-              <button onClick={addSchedule} className="w-full text-[var(--bc-navy)] rounded-lg py-2 text-sm font-semibold" style={{ backgroundColor: "var(--bc-blue)" }}>일정 추가</button>
+              <button onClick={addSchedule} className="w-full text-[var(--bc-navy)] rounded-lg py-2 text-sm font-semibold" style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}>일정 추가</button>
             </div>
           )}
         </div>
@@ -660,7 +660,7 @@ function App() {
           <button
             onClick={adminOn ? lock : () => tryUnlock()}
             className={`text-[11px] px-3 py-1.5 rounded-full border ${adminOn ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
-            style={adminOn ? { backgroundColor: "var(--bc-blue)" } : {}}
+            style={adminOn ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
           >
             {adminOn ? "🔓 관리자" : "🔒 관리자"}
           </button>

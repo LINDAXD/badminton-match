@@ -125,7 +125,8 @@ function AppModalHost() {
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && close(inputVal)}
-            className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-green-500"
+            className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2"
+            style={{ "--tw-ring-color": "var(--bc-navy)" }}
           />
         )}
         <div className="flex gap-2">
@@ -140,7 +141,7 @@ function AppModalHost() {
           <button
             onClick={() => close(modal.type === "confirm" ? true : modal.type === "prompt" ? inputVal : true)}
             className="flex-1 rounded-lg py-2 text-sm font-semibold text-white"
-            style={{ backgroundColor: "var(--bc-blue)" }}
+            style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}
           >
             확인
           </button>
@@ -502,14 +503,14 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
                   {SOCIAL_TAGS.map((t) => (
                     <button key={t.key} onClick={() => toggleSocial(t.key)}
                       className={`text-xs px-2.5 py-1.5 rounded-full border ${social[t.key] ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                      style={social[t.key] ? { backgroundColor: "var(--bc-blue)" } : {}}>
+                      style={social[t.key] ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}>
                       {t.emoji} {t.label}
                     </button>
                   ))}
                 </div>
               </div>
               <div className="flex gap-2 pt-1">
-                <button onClick={save} className="flex-1 rounded-lg py-2 text-sm font-semibold text-[var(--bc-navy)]" style={{ backgroundColor: "var(--bc-blue)" }}>저장</button>
+                <button onClick={save} className="flex-1 rounded-lg py-2 text-sm font-semibold text-[var(--bc-navy)]" style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}>저장</button>
                 <button onClick={() => setEdit(false)} className="flex-1 rounded-lg py-2 text-sm font-semibold border border-stone-200 text-stone-500">취소</button>
               </div>
             </div>
@@ -633,7 +634,7 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
                       key={b.key}
                       onClick={() => toggleManualBadge(b.key)}
                       className={`text-xs px-2.5 py-1.5 rounded-full border tap-scale ${has ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                      style={has ? { backgroundColor: "var(--bc-blue)" } : {}}
+                      style={has ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
                     >
                       {b.emoji} {b.label} {has ? "· 지급됨" : ""}
                     </button>
@@ -800,7 +801,7 @@ function useRoster() {
 // 트랜잭션으로 처리해요 — 다들 거의 동시에 참석 누르는 순간이라 충돌 위험이 제일 큰 곳이에요.
 async function setRsvpFor(item, status, myId, myName) {
   if (!myId) {
-    appAlert("참석 체크를 하려면 먼저 홈에서 이름으로 입장해주세요.");
+    appAlert("참석 체크를 하려면 먼저 홈에서 닉네임으로 입장해주세요.");
     return;
   }
   let wasIn = false;
@@ -887,7 +888,7 @@ function RequireLogin({ myId, children }) {
       <a
         href="./index.html#login"
         className="text-white text-sm font-semibold px-6 py-2.5 rounded-full"
-        style={{ backgroundColor: "var(--bc-blue)" }}
+        style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}
       >
         🏠 홈으로 가서 입장하기
       </a>

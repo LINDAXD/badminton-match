@@ -199,7 +199,7 @@ function ManualPicker({ waitingPlayers, selected, onToggle, onConfirm, onAutoFil
                 className={`px-2.5 py-1 rounded-full text-xs border transition ${
                   picked ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"
                 }`}
-                style={picked ? { backgroundColor: "var(--bc-blue)" } : {}}
+                style={picked ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
               >
                 {p.name}
               </button>
@@ -234,7 +234,7 @@ function ManualPicker({ waitingPlayers, selected, onToggle, onConfirm, onAutoFil
           <button
             onClick={onAutoFill}
             className="flex-1 rounded-lg py-2 text-xs font-semibold text-white"
-            style={{ backgroundColor: "var(--bc-blue)" }}
+            style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}
           >
             나머지 {4 - selected.length}명 자동으로 채우고 시작
           </button>
@@ -243,7 +243,7 @@ function ManualPicker({ waitingPlayers, selected, onToggle, onConfirm, onAutoFil
             disabled={selected.length !== 4}
             onClick={onConfirm}
             className="flex-1 rounded-lg py-2 text-xs font-semibold text-white disabled:bg-stone-300 disabled:text-stone-500"
-            style={selected.length === 4 ? { backgroundColor: "var(--bc-blue)" } : {}}
+            style={selected.length === 4 ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
           >
             이 4명으로 시작
           </button>
@@ -360,7 +360,7 @@ function ShuttlecockPanel({ players, myId, adminOn }) {
               onClick={() => toggleSubmitted(p.id)}
               disabled={!canEdit}
               className={`text-xs pl-2.5 pr-1.5 py-1.5 rounded-full border tap-scale disabled:opacity-60 flex items-center gap-1 ${done ? "text-white border-transparent" : "bg-stone-50 text-stone-500 border-stone-200"}`}
-              style={done ? { backgroundColor: "var(--bc-blue)" } : {}}
+              style={done ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
             >
               {done ? "🏸 " : ""}{p.name}
               {adminOn && (
@@ -1264,7 +1264,7 @@ function App() {
 
   async function startRandomMatchAsMember(courtNum, opts) {
     const silent = opts && opts.silent;
-    if (!myId) { if (!silent) appAlert("먼저 홈에서 이름으로 입장해주세요."); return false; }
+    if (!myId) { if (!silent) appAlert("먼저 홈에서 닉네임으로 입장해주세요."); return false; }
     if (meetingEndedToday) { if (!silent) appAlert("오늘 모임이 이미 종료됐어요."); return false; }
     if (lockedCourts.includes(courtNum)) { if (!silent) appAlert("이 코트는 잠겨있어요."); return false; }
     if (randomBusy) return false; // 중복 클릭 방지
@@ -1319,7 +1319,7 @@ function App() {
   // 현재 경기가 끝나는 순간(경기 종료) 자동으로 이 미리 정한 매칭이 바로 시작돼요 — 매번 기다렸다가 다시 매칭할 필요 없이요.
   const [queueBusy, setQueueBusy] = useState(null);
   async function queueNextMatch(courtNum) {
-    if (!myId) { appAlert("먼저 홈에서 이름으로 입장해주세요."); return; }
+    if (!myId) { appAlert("먼저 홈에서 닉네임으로 입장해주세요."); return; }
     if (queueBusy) return;
     setQueueBusy(courtNum);
     try {
@@ -1713,7 +1713,7 @@ function App() {
           className={`text-[11px] px-3 py-1.5 rounded-full border shrink-0 ${
             adminOn ? "text-white border-transparent" : "text-stone-400 border-stone-200"
           }`}
-          style={adminOn ? { backgroundColor: "var(--bc-blue)" } : {}}
+          style={adminOn ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
         >
           {adminOn ? "🔓 관리자" : "🔒 관리자"}
         </button>
@@ -1721,7 +1721,7 @@ function App() {
           <button
             onClick={() => setTab(tab === "players" ? "match" : "players")}
             className={`mt-2 w-full rounded-xl py-2 text-xs font-semibold border ${tab === "players" ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-            style={tab === "players" ? { backgroundColor: "var(--bc-blue)" } : {}}
+            style={tab === "players" ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
           >
             👥 참석자 관리 {tab === "players" ? "닫기" : "열기"}
           </button>
@@ -1928,7 +1928,7 @@ function App() {
                   placeholder="가끔 오는 게스트 이름"
                   className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm"
                 />
-                <button onClick={addGuest} className="text-[var(--bc-navy)] rounded-lg px-4 text-sm font-semibold" style={{ backgroundColor: "var(--bc-blue)" }}>
+                <button onClick={addGuest} className="text-[var(--bc-navy)] rounded-lg px-4 text-sm font-semibold" style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}>
                   게스트 추가
                 </button>
               </div>
@@ -2380,14 +2380,14 @@ function App() {
                           <button
                             onClick={() => setWinnerOverride(courtNum, "A")}
                             className={`flex-1 py-2 rounded-xl text-xs font-semibold border ${m.winnerOverride === "A" ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                            style={m.winnerOverride === "A" ? { backgroundColor: "var(--bc-blue)" } : {}}
+                            style={m.winnerOverride === "A" ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
                           >
                             🏆 {m.teamA[0].name}·{m.teamA[1].name} 승리
                           </button>
                           <button
                             onClick={() => setWinnerOverride(courtNum, "B")}
                             className={`flex-1 py-2 rounded-xl text-xs font-semibold border ${m.winnerOverride === "B" ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                            style={m.winnerOverride === "B" ? { backgroundColor: "var(--bc-blue)" } : {}}
+                            style={m.winnerOverride === "B" ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
                           >
                             🏆 {m.teamB[0].name}·{m.teamB[1].name} 승리
                           </button>
@@ -2669,7 +2669,7 @@ function App() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-lg font-bold text-stone-800 truncate">{myMember ? myMember.name : "나"}</p>
-                        <span className="bc-badge2" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}>
+                        <span className="bc-badge2" style={{ backgroundColor: "#FFFFFF", color: "var(--bc-navy)", border: "1.5px solid var(--bc-navy)" }}>
                           {myStage === "provisional0" ? "🆕 평가중" : myStage === "provisional1" ? "🟡 임시급수" : `${myTier}급`}
                         </span>
                       </div>
@@ -2801,7 +2801,7 @@ function App() {
                             key={key}
                             onClick={() => setRecordFilter(key)}
                             className={`px-4 py-1.5 rounded-full text-xs font-semibold border ${recordFilter === key ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                            style={recordFilter === key ? { backgroundColor: "var(--bc-blue)" } : {}}
+                            style={recordFilter === key ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
                           >
                             {label}
                           </button>
@@ -2832,7 +2832,7 @@ function App() {
                         </div>
                         <div className="p-4">
                           <p className="text-xs text-stone-400 mb-3">{m.court}코트</p>
-                          <div className="rounded-xl p-3 text-center mb-1.5" style={{ backgroundColor: "var(--bc-blue)" }}>
+                          <div className="rounded-xl p-3 text-center mb-1.5" style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}>
                             <p className="text-sm font-bold text-white">{(m.teamA || []).map((p) => p.name).join(" + ")}</p>
                           </div>
                           <p className="text-center text-xs text-stone-400 my-1 font-bold">VS</p>
@@ -2931,7 +2931,7 @@ function App() {
                       key={t}
                       onClick={() => setTierFilter(t)}
                       className={`bc-btn-lg shrink-0 px-4 text-xs font-semibold border ${tierFilter === t ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                      style={tierFilter === t ? { backgroundColor: "var(--bc-blue)" } : {}}
+                      style={tierFilter === t ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
                     >
                       {t === "전체" ? "전체" : `${t}급`}
                     </button>

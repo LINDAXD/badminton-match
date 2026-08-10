@@ -79,7 +79,7 @@ function MyBirthdayField({ me, onSave }) {
           placeholder="000000"
           className="text-xs border border-stone-200 rounded-lg px-2 py-1.5 w-20 focus:outline-none focus:ring-2 focus:ring-green-500"
         />
-        <button onClick={save} className="text-[11px] text-[var(--bc-navy)] font-semibold rounded-lg px-3 py-1.5 shrink-0" style={{ backgroundColor: "var(--bc-blue)" }}>
+        <button onClick={save} className="text-[11px] text-[var(--bc-navy)] font-semibold rounded-lg px-3 py-1.5 shrink-0" style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}>
           저장
         </button>
         {me && me.birthday && !msg && (
@@ -269,10 +269,10 @@ function App() {
 
   async function doLogin() {
     const name = loginInput.trim();
-    if (!name) { setLoginMsg("이름을 입력해주세요."); return; }
+    if (!name) { setLoginMsg("닉네임을 입력해주세요."); return; }
     if (!rosterReady) { setLoginMsg("회원 명단을 불러오는 중이에요. 잠시 후 다시 눌러주세요."); return; }
     // 한글은 기기/키보드에 따라 눈에는 똑같아 보여도 내부 코드가 미세하게 다르게 저장될 수 있어서(정규화 차이),
-    // 양쪽 다 표준 형태로 맞춰서 비교해요 — 이래야 "이미 있는 이름인데 처음 왔다고 뜨는" 문제가 확실히 없어져요.
+    // 양쪽 다 표준 형태로 맞춰서 비교해요 — 이래야 "이미 있는 닉네임인데 처음 왔다고 뜨는" 문제가 확실히 없어져요.
     const normalizedName = name.normalize("NFC");
     const existing = roster.find((m) => (m.name || "").trim().normalize("NFC") === normalizedName);
     if (existing) {
@@ -298,7 +298,7 @@ function App() {
     } else {
       const alreadyPending = pending.some((p) => (p.name || "").normalize("NFC") === normalizedName);
       if (alreadyPending) {
-        setLoginMsg("이미 관리자 승인을 기다리고 있는 이름이에요. 승인되면 로그인할 수 있어요.");
+        setLoginMsg("이미 관리자 승인을 기다리고 있는 닉네임이에요. 승인되면 로그인할 수 있어요.");
         setLoginInput("");
         return;
       }
@@ -307,7 +307,7 @@ function App() {
       if (!/^\d{4}$/.test(pin)) { setLoginMsg("비밀번호는 숫자 4자리로만 설정할 수 있어요. 더 길거나 짧으면 안 돼요."); return; }
       const req = { id: uid(), name, pin, level: signupLevel, requestedAt: todayStr() };
       REFS.pending.set({ items: [...pending, req] }).catch(() => {});
-      setLoginMsg("가입 신청됐어요! 관리자 승인 후 이 이름과 비밀번호로 로그인할 수 있어요. 🙏");
+      setLoginMsg("가입 신청됐어요! 관리자 승인 후 이 닉네임과 비밀번호로 로그인할 수 있어요. 🙏");
     }
     setLoginInput("");
   }
@@ -486,9 +486,9 @@ function App() {
               <button
                 onClick={() => setShowLoginModal(true)}
                 className="tap-scale w-full text-center text-sm font-bold py-3 rounded-2xl"
-                style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}
+                style={{ backgroundColor: "#FFFFFF", color: "var(--bc-navy)", border: "1.5px solid var(--bc-navy)" }}
               >
-                이름으로 입장하기 →
+                닉네임으로 입장하기 →
               </button>
             </>
           )}
@@ -540,7 +540,7 @@ function App() {
             <button
               onClick={togglePaid}
               className={`w-full rounded-xl py-2.5 text-sm font-semibold tap-scale ${payments[myId] ? "text-white" : "border"}`}
-              style={payments[myId] ? { backgroundColor: "var(--bc-blue)" } : { borderColor: "var(--bc-blue)", color: "var(--bc-blue)" }}
+              style={payments[myId] ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : { borderColor: "var(--bc-blue)", color: "var(--bc-blue)" }}
             >
               {payments[myId] ? "✅ 송금완료" : "송금완료 눌러주세요"}
             </button>
@@ -592,19 +592,19 @@ function App() {
       {showLoginModal && !myId && (
         <div className="fixed inset-0 bg-black/50 z-[90] flex items-center justify-center px-6" onClick={() => setShowLoginModal(false)}>
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm rise-in" onClick={(e) => e.stopPropagation()}>
-            <p className="text-sm font-bold text-stone-800 mb-1">🏸 이름으로 입장하기</p>
-            <p className="text-xs text-stone-400 mb-3">기존 멤버는 이름 그대로, 처음이면 가입 신청 후 관리자 승인을 받아요.</p>
+            <p className="text-sm font-bold text-stone-800 mb-1">🏸 닉네임으로 입장하기</p>
+            <p className="text-xs text-stone-400 mb-3">기존 멤버는 닉네임 그대로, 처음이면 가입 신청 후 관리자 승인을 받아요.</p>
             <div className="flex gap-2">
               <input
                 autoFocus
                 value={loginInput}
                 onChange={(e) => { setLoginInput(e.target.value); if (loginMsg) setLoginMsg(""); }}
                 onKeyDown={(e) => e.key === "Enter" && doLogin()}
-                placeholder="이름 입력"
+                placeholder="닉네임 입력"
                 className="flex-1 rounded-xl border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2"
                 style={{ "--tw-ring-color": "var(--bc-blue)" }}
               />
-              <button onClick={doLogin} className="text-[var(--bc-navy)] rounded-xl px-4 text-sm font-semibold tap-scale" style={{ backgroundColor: "var(--bc-blue)" }}>입장</button>
+              <button onClick={doLogin} className="text-[var(--bc-navy)] rounded-xl px-4 text-sm font-semibold tap-scale" style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}>입장</button>
             </div>
             <div className="flex items-center gap-2 mt-3">
               <span className="text-[11px] text-stone-400 shrink-0">처음이면 내 실력</span>
@@ -630,7 +630,7 @@ function App() {
                 {loginMsg}
               </div>
             )}
-            <p className="text-[10px] text-stone-300 mt-2">🔒 다른 사람의 이름으로는 비밀번호 없이 입장할 수 없어요.</p>
+            <p className="text-[10px] text-stone-300 mt-2">🔒 다른 사람의 닉네임으로는 비밀번호 없이 입장할 수 없어요.</p>
             <button onClick={() => setShowLoginModal(false)} className="mt-4 w-full text-xs text-stone-400 underline underline-offset-2">닫기</button>
           </div>
         </div>
@@ -770,7 +770,7 @@ function App() {
             <div className="flex items-center justify-between mb-3">
               <p className="text-[11px] font-semibold text-stone-400 tracking-wide">🙋 내 기록</p>
               {myTier && (
-                <span className="bc-badge2" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}>
+                <span className="bc-badge2" style={{ backgroundColor: "#FFFFFF", color: "var(--bc-navy)", border: "1.5px solid var(--bc-navy)" }}>
                   {myStage === "provisional0" ? "🆕 평가중" : myStage === "provisional1" ? "🟡 임시급수" : `${myTier}급`}
                 </span>
               )}
