@@ -284,6 +284,7 @@ function App() {
         <MenuGrid
           items={[
             { key: "schedule", emoji: "🗓️", mascotSlot: "buddy-schedule", title: "일정", subtitle: "참석 체크·출석왕", onClick: () => setActiveView("schedule") },
+            { key: "members", emoji: "👥", title: "회원", subtitle: "전체 회원 명단 보기", onClick: () => { window.location.href = "./members.html"; } },
             ...(adminOn ? [{ key: "admin", emoji: "🛠️", title: "관리자 전용", subtitle: "회원 관리", onClick: () => setActiveView("admin") }] : []),
           ]}
         />

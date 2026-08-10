@@ -494,7 +494,13 @@ function OpsRecommendation({ waitingPlayers, players, matchhistory, matchMode, i
 }
 
 function App() {
-  const [tab, setTab] = useState("match");
+  const [tab, setTab] = useState(() => {
+    try {
+      const q = new URLSearchParams(window.location.search).get("tab");
+      if (["match", "record", "ranking", "players"].includes(q)) return q;
+    } catch (e) {}
+    return "match";
+  });
   const [players, setPlayers] = useState([]);
   const [roster, setRoster] = useState([]);
   const [rosterReady, setRosterReady] = useState(false);
@@ -784,20 +790,30 @@ function App() {
   }
 
   // 통산 전적(승/패/경기수) — matchhistory(영구 저장)에서 계산 + 관리자 수동 보정값 반영
+  function matchWinnerSide(m) {
+    // 새 기록은 winner 필드가 명시적으로 저장돼요. 옛날 기록(필드 생기기 전)은 점수 비교로 판정해요.
+    if (m.winner === "A" || m.winner === "B") return m.winner;
+    const sA = Number(m.scoreA), sB = Number(m.scoreB);
+    if (m.scoreA === "" || m.scoreB === "" || isNaN(sA) || isNaN(sB) || sA === sB) return null;
+    return sA > sB ? "A" : "B";
+  }
+
   function lifetimeStatsFor(id) {
     let games = 0, wins = 0, losses = 0, pointsFor = 0, pointsAgainst = 0;
     matchhistory.forEach((m) => {
       const inA = (m.teamA || []).some((p) => p.id === id);
       const inB = (m.teamB || []).some((p) => p.id === id);
       if (!inA && !inB) return;
-      const sA = Number(m.scoreA), sB = Number(m.scoreB);
-      if (isNaN(sA) || isNaN(sB)) return;
+      const side = matchWinnerSide(m);
+      if (!side) return;
       games++;
-      const aWin = sA > sB;
-      const won = (inA && aWin) || (inB && !aWin);
+      const won = (inA && side === "A") || (inB && side === "B");
       if (won) wins++; else losses++;
-      pointsFor += inA ? sA : sB;
-      pointsAgainst += inA ? sB : sA;
+      const sA = Number(m.scoreA), sB = Number(m.scoreB);
+      if (m.scoreA !== "" && m.scoreB !== "" && !isNaN(sA) && !isNaN(sB)) {
+        pointsFor += inA ? sA : sB;
+        pointsAgainst += inA ? sB : sA;
+      }
     });
     const adj = statsAdjust[id];
     if (adj) {
@@ -808,11 +824,11 @@ function App() {
     return { games, wins: Math.max(0, wins), losses: Math.max(0, losses), pointsFor, pointsAgainst };
   }
 
-  // 내 최근 경기들 (점수·점수차까지) — "내 기록" 카드에서 써요
+  // 내 최근 경기들 — 점수를 입력 안 하고 승리팀만 고른 경기도 포함해요 (승/패 판정은 되니까요)
   function myRecentMatches(id, n) {
     return matchhistory
       .filter((m) => (m.teamA || []).some((p) => p.id === id) || (m.teamB || []).some((p) => p.id === id))
-      .filter((m) => m.scoreA !== "" && m.scoreB !== "" && !isNaN(Number(m.scoreA)) && !isNaN(Number(m.scoreB)))
+      .filter((m) => matchWinnerSide(m) !== null)
       .slice(0, n);
   }
 
@@ -1402,6 +1418,9 @@ function App() {
   // "빈 코트 한번에 매칭 시작" — 처음 참석자 다 모였을 때 관리자든 회원이든 한 번에 눌러서 확 시작할 수 있게 해요.
   const [batchStarting, setBatchStarting] = useState(false);
   const [tierFilter, setTierFilter] = useState("전체"); // 통산 순위 급수 탭 필터
+  const [recordDetailId, setRecordDetailId] = useState(null); // 기록 탭 - 경기 상세 보기
+  const [showFullRecords, setShowFullRecords] = useState(false); // 기록 탭 - 전체 경기 기록 보기
+  const [recordFilter, setRecordFilter] = useState("all"); // 전체 경기 기록 필터: all | win | loss
   const [batchDoneMsg, setBatchDoneMsg] = useState("");
   async function startAllEmptyCourts() {
     if (!myId || batchStarting) return;
@@ -1562,6 +1581,7 @@ function App() {
   // 실력점수(ELO식) 업데이트 — 경기가 끝나면 이긴 팀은 올라가고 진 팀은 내려가요.
   // 비슷한 실력끼리 붙으면 조금, 나보다 센 상대를 이기면 더 많이 올라가요.
   async function applySkillRatingUpdate(m, aWin) {
+    let deltas = null;
     try {
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(REFS.roster);
@@ -1574,6 +1594,12 @@ function App() {
         const ratingA = teamAIds.reduce((sum, id) => sum + getSkillScore(byId[id]), 0) / teamAIds.length;
         const ratingB = teamBIds.reduce((sum, id) => sum + getSkillScore(byId[id]), 0) / teamBIds.length;
         const { deltaA, deltaB } = computeEloDelta(ratingA, ratingB, aWin);
+        deltas = {};
+        [...teamAIds, ...teamBIds].forEach((id) => {
+          const before = getSkillScore(byId[id]);
+          const after = before + (teamAIds.includes(id) ? deltaA : deltaB);
+          deltas[id] = { before: Math.round(before), after: Math.round(after) };
+        });
         const next = list.map((mm) => {
           if (teamAIds.includes(mm.id)) return { ...mm, skillScore: getSkillScore(mm) + deltaA };
           if (teamBIds.includes(mm.id)) return { ...mm, skillScore: getSkillScore(mm) + deltaB };
@@ -1582,6 +1608,7 @@ function App() {
         tx.set(REFS.roster, { members: next });
       });
     } catch (e) {}
+    return deltas;
   }
 
   // 점수 없이도 승/패만으로 경기를 끝낼 수 있게, 팀을 직접 지정할 수 있어요
@@ -1626,7 +1653,19 @@ function App() {
       return nh;
     });
 
-    applySkillRatingUpdate(m, aWin);
+    applySkillRatingUpdate(m, aWin).then((deltas) => {
+      logMatchResult({
+        round: matchSeq,
+        court: m.court,
+        time: new Date().toTimeString().slice(0, 5),
+        teamA: m.teamA.map((p) => ({ id: p.id, name: p.name })),
+        teamB: m.teamB.map((p) => ({ id: p.id, name: p.name })),
+        scoreA: m.scoreA,
+        scoreB: m.scoreB,
+        winner: aWin ? "A" : "B", // 점수를 입력 안 해도(승리팀만 선택해도) 승/패가 정확히 저장되도록 명시적으로 기록해요
+        skillDeltas: deltas || null,
+      });
+    });
 
     // 경기 종료 요약을 보여주고, 바로 이어서 다음 게임 매칭까지 안내해요 (수동으로 닫기 전까진 유지)
     setMatchEndSummary({
@@ -1641,14 +1680,6 @@ function App() {
     delete finished.next;
     delete finished.winnerOverride;
     setHistory((hArr) => [{ ...finished, round: matchSeq }, ...hArr]);
-    logMatchResult({
-      round: matchSeq,
-      court: m.court,
-      teamA: m.teamA.map((p) => ({ id: p.id, name: p.name })),
-      teamB: m.teamB.map((p) => ({ id: p.id, name: p.name })),
-      scoreA: m.scoreA,
-      scoreB: m.scoreB,
-    });
 
     // 미리 정해둔 "다음 경기"가 있으면, 끝나자마자 바로 그 매칭으로 시작해요. 없으면 예전처럼 빈 코트로 남아요.
     const nextCourtState = m.next
@@ -1693,7 +1724,8 @@ function App() {
         <div className="flex gap-1.5 bg-stone-50 rounded-2xl p-1.5 border border-stone-100">
           {[
             { key: "match", label: "매칭", emoji: "🔀" },
-            { key: "record", label: "기록", emoji: "🏆" },
+            { key: "record", label: "기록", emoji: "🏸" },
+            { key: "ranking", label: "랭킹", emoji: "🏆" },
             ...(adminOn ? [{ key: "players", label: "참석자 관리", emoji: "👥" }] : []),
           ].map(({ key, label, emoji }) => (
             <button
@@ -2589,125 +2621,272 @@ function App() {
           {myId && (() => {
             const s = lifetimeStatsFor(myId);
             const rate = s.games > 0 ? Math.round((s.wins / s.games) * 100) : 0;
-            const recent = myRecentMatches(myId, 20);
+            const allRecent = myRecentMatches(myId, 999); // 판정 가능한 전체 경기 (점수 없이 승리팀만 고른 경기 포함)
             const myMember = roster.find((r) => r.id === myId);
             const mySkill = getSkillScore(myMember);
             const myTier = tierForScore(mySkill, s.games);
             const myStage = evaluationStage(s.games);
-            const last5 = recent.slice(0, 5).map((m) => {
+
+            function myWon(m) {
               const inA = (m.teamA || []).some((p) => p.id === myId);
-              const won = inA ? Number(m.scoreA) > Number(m.scoreB) : Number(m.scoreB) > Number(m.scoreA);
-              return won;
-            });
-            return (
-              <div className="bc-card overflow-hidden">
-                {/* 프로필 영역 */}
-                <div className="p-4 flex items-center gap-3.5 border-b" style={{ borderColor: "var(--bc-line)" }}>
-                  <Avatar name={myMember ? myMember.name : "나"} size={56} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-lg font-bold text-stone-800 truncate">{myMember ? myMember.name : "나"}</p>
+              const side = matchWinnerSide(m);
+              return (inA && side === "A") || (!inA && side === "B");
+            }
+            function matchHasScore(m) {
+              return m.scoreA !== "" && m.scoreB !== "" && !isNaN(Number(m.scoreA)) && !isNaN(Number(m.scoreB));
+            }
+            const last5 = allRecent.slice(0, 5).map(myWon);
+
+            // 실력점수 변화 스파크라인 — 경기 5개 이상 쌓였을 때만, 오래된→최신 순으로
+            const scoreTrend = allRecent
+              .filter((m) => m.skillDeltas && m.skillDeltas[myId])
+              .slice(0, 10)
+              .reverse()
+              .map((m) => Math.round(m.skillDeltas[myId].after));
+
+            function renderMatchRow(m) {
+              const won = myWon(m);
+              const hasScore = matchHasScore(m);
+              const shortDate = (m.date || "").slice(5).replace("-", "/");
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => setRecordDetailId(m.id)}
+                  className="w-full text-left rounded-xl p-3 border flex items-center justify-between gap-2 active:scale-[0.99] transition"
+                  style={{ borderColor: "var(--bc-line)" }}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
                       <span
                         className="bc-badge2"
-                        style={{ backgroundColor: "var(--bc-blue)", color: "white" }}
+                        style={won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
                       >
-                        {myStage === "provisional0" ? "🆕 평가중" : myStage === "provisional1" ? "🟡 임시급수" : `${myTier}급`}
+                        {won ? "🟢 승리" : "🔴 패배"}
                       </span>
+                      <span className="text-xs text-stone-400">{shortDate}</span>
                     </div>
-                    <p className="text-sm text-stone-500 mt-0.5">실력점수 <b className="text-stone-700">{Math.round(mySkill)}</b>점</p>
-                    {myStage !== "rated" && (
-                      <p className="text-[11px] mt-1" style={{ color: "var(--bc-blue)" }}>
-                        {myStage === "provisional0" ? "평가중 → 10경기 이상 시 정식급수" : "임시급수 → 10경기 이상 시 정식급수"}
-                      </p>
-                    )}
+                    <p className="text-xs text-stone-500 mt-1">
+                      {hasScore ? `A팀 ${m.scoreA} : ${m.scoreB} B팀` : "점수 미기록"} · {m.court}코트
+                    </p>
                   </div>
-                </div>
+                  <span className="text-stone-300 shrink-0">›</span>
+                </button>
+              );
+            }
 
-                {s.games === 0 ? (
-                  /* 빈 상태: 아직 경기 기록이 없는 신규 회원 */
-                  <div className="px-4 py-8 text-center">
-                    <p className="text-3xl mb-2">🏸</p>
-                    <p className="text-sm font-semibold text-stone-600">아직 경기 기록이 없어요</p>
-                    <p className="text-xs text-stone-400 mt-1">첫 경기를 마치면 여기에 기록이 쌓여요.</p>
+            return (
+              <div className="space-y-4">
+                {/* 예시 이미지와 동일한 구성: 프로필 헤더 + 경기요약/최근경기 2단 + 최근5경기 + 더보기 */}
+                <div className="bc-card overflow-hidden">
+                  <div className="p-4 flex items-center gap-3.5 border-b" style={{ borderColor: "var(--bc-line)" }}>
+                    <Avatar name={myMember ? myMember.name : "나"} size={56} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-lg font-bold text-stone-800 truncate">{myMember ? myMember.name : "나"}</p>
+                        <span className="bc-badge2" style={{ backgroundColor: "var(--bc-blue)", color: "white" }}>
+                          {myStage === "provisional0" ? "🆕 평가중" : myStage === "provisional1" ? "🟡 임시급수" : `${myTier}급`}
+                        </span>
+                      </div>
+                      <p className="text-sm text-stone-500 mt-0.5">실력점수 <b className="text-stone-700">{Math.round(mySkill)}</b>점</p>
+                      {myStage !== "rated" && (
+                        <p className="text-[11px] mt-1" style={{ color: "var(--bc-blue)" }}>
+                          {myStage === "provisional0" ? "평가중 → 10경기 이상 시 정식급수" : "임시급수 → 10경기 이상 시 정식급수"}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-2">
-                    {/* 경기 요약 */}
-                    <div className="p-4 space-y-2.5 border-r" style={{ borderColor: "var(--bc-line)" }}>
-                      <p className="text-xs font-bold text-stone-400 mb-1">경기 요약</p>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-stone-500">총 경기</span>
-                        <span className="text-sm font-bold text-stone-800">{s.games}경기</span>
+
+                  {s.games === 0 ? (
+                    <div className="px-4 py-8 text-center">
+                      <p className="text-3xl mb-2">🏸</p>
+                      <p className="text-sm font-semibold text-stone-600">아직 경기 기록이 없어요</p>
+                      <p className="text-xs text-stone-400 mt-1">첫 경기를 마치면 여기에 기록이 쌓여요.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2">
+                        {/* 경기 요약 */}
+                        <div className="p-4 space-y-2.5 border-r" style={{ borderColor: "var(--bc-line)" }}>
+                          <p className="text-xs font-bold text-stone-400 mb-1">경기 요약</p>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-stone-500">총 경기</span>
+                            <span className="text-sm font-bold text-stone-800">{s.games}경기</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-stone-500">승</span>
+                            <span className="text-sm font-bold" style={{ color: "#16A34A" }}>{s.wins}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-stone-500">패</span>
+                            <span className="text-sm font-bold" style={{ color: "#DC2626" }}>{s.losses}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-stone-500">승률</span>
+                            <span className="text-sm font-bold" style={{ color: "var(--bc-blue)" }}>{rate}%</span>
+                          </div>
+                        </div>
+
+                        {/* 최근 경기 기록 */}
+                        <div className="p-4">
+                          <p className="text-xs font-bold text-stone-400 mb-2">최근 경기 기록</p>
+                          <div className="space-y-2">
+                            {allRecent.slice(0, 5).map((m) => {
+                              const won = myWon(m);
+                              const shortDate = (m.date || "").slice(5).replace("-", "/");
+                              return (
+                                <button
+                                  key={m.id}
+                                  onClick={() => setRecordDetailId(m.id)}
+                                  className="w-full flex items-center justify-between"
+                                >
+                                  <span className="text-xs text-stone-500">{shortDate}</span>
+                                  <span
+                                    className="bc-badge2"
+                                    style={won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
+                                  >
+                                    {won ? "승리" : "패배"}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-stone-500">승</span>
-                        <span className="text-sm font-bold text-stone-800">{s.wins}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-stone-500">패</span>
-                        <span className="text-sm font-bold text-stone-800">{s.losses}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-stone-500">승률</span>
-                        <span className="text-sm font-bold" style={{ color: "var(--bc-blue)" }}>{rate}%</span>
-                      </div>
+
+                      {/* 최근 5경기 */}
                       {last5.length > 0 && (
-                        <div className="pt-1">
-                          <span className="text-sm text-stone-500 block mb-1.5">최근 5경기</span>
-                          <div className="flex gap-1">
-                            {last5.map((won, i) => (
-                              <span
-                                key={i}
-                                className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold"
-                                style={won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
-                              >
-                                {won ? "승" : "패"}
-                              </span>
-                            ))}
+                        <div className="px-4 pb-3 pt-3 border-t flex items-center gap-2" style={{ borderColor: "var(--bc-line)" }}>
+                          <span className="text-xs text-stone-400 shrink-0">최근 5경기</span>
+                          <div className="flex gap-1.5 text-base">
+                            {last5.map((won, i) => <span key={i}>{won ? "🟢" : "🔴"}</span>)}
                           </div>
                         </div>
                       )}
-                    </div>
 
-                    {/* 최근 경기 기록 */}
-                    <div className="p-4">
-                      <p className="text-xs font-bold text-stone-400 mb-2">최근 경기 기록</p>
-                      {(() => {
-                        const renderRow = (m) => {
-                          const inA = (m.teamA || []).some((p) => p.id === myId);
-                          const won = inA ? Number(m.scoreA) > Number(m.scoreB) : Number(m.scoreB) > Number(m.scoreA);
-                          const shortDate = (m.date || "").slice(5).replace("-", "/");
-                          return (
-                            <div key={m.id} className="flex items-center justify-between">
-                              <span className="text-xs text-stone-500">{shortDate}</span>
-                              <span
-                                className="bc-badge2"
-                                style={won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
-                              >
-                                {won ? "승리" : "패배"}
-                              </span>
-                            </div>
-                          );
-                        };
-                        return (
-                          <>
-                            <div className="space-y-2">{recent.slice(0, 5).map(renderRow)}</div>
-                            {recent.length > 5 && (
-                              <details className="mt-2">
-                                <summary className="text-center text-[11px] font-semibold cursor-pointer list-none" style={{ color: "var(--bc-blue)" }}>더보기 ▾</summary>
-                                <div className="space-y-2 mt-2">{recent.slice(5, 20).map(renderRow)}</div>
-                              </details>
-                            )}
-                          </>
-                        );
-                      })()}
+                      {/* 실력점수 변화 — 5경기 이상 쌓였을 때만 살짝 보여줘요 */}
+                      {scoreTrend.length >= 5 && (
+                        <div className="px-4 pb-4 pt-3 border-t" style={{ borderColor: "var(--bc-line)" }}>
+                          <p className="text-xs text-stone-400 mb-2">📈 실력점수 변화</p>
+                          <div className="flex items-end gap-1 h-12">
+                            {(() => {
+                              const min = Math.min(...scoreTrend), max = Math.max(...scoreTrend);
+                              const range = Math.max(1, max - min);
+                              return scoreTrend.map((v, i) => (
+                                <div key={i} className="flex-1 flex flex-col items-center justify-end h-full" title={String(v)}>
+                                  <div
+                                    className="w-full rounded-t"
+                                    style={{ height: `${Math.max(8, ((v - min) / range) * 100)}%`, backgroundColor: "var(--bc-blue)" }}
+                                  />
+                                </div>
+                              ));
+                            })()}
+                          </div>
+                          <p className="text-[11px] text-stone-400 mt-1.5 text-center">{scoreTrend.join(" → ")}</p>
+                        </div>
+                      )}
+
+                      {allRecent.length > 5 && (
+                        <div className="px-4 pb-4">
+                          <button
+                            onClick={() => setShowFullRecords(true)}
+                            className="bc-btn-lg w-full text-xs font-semibold border"
+                            style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}
+                          >
+                            더보기 ({allRecent.length}경기 전체)
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+
+                {/* ⑥⑦ 전체 경기 기록 + 필터 */}
+                {showFullRecords && (
+                  <div className="fixed inset-0 z-[90] bg-black/40 flex items-end justify-center" onClick={() => setShowFullRecords(false)}>
+                    <div className="bg-white rounded-t-3xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                      <div className="px-4 py-3 flex items-center justify-between border-b" style={{ borderColor: "var(--bc-line)" }}>
+                        <p className="text-sm font-bold text-stone-800">전체 경기 기록</p>
+                        <button onClick={() => setShowFullRecords(false)} className="text-stone-400 text-sm">✕ 닫기</button>
+                      </div>
+                      <div className="px-4 pt-3 flex gap-1.5">
+                        {[["all", "전체"], ["win", "승리"], ["loss", "패배"]].map(([key, label]) => (
+                          <button
+                            key={key}
+                            onClick={() => setRecordFilter(key)}
+                            className={`px-4 py-1.5 rounded-full text-xs font-semibold border ${recordFilter === key ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
+                            style={recordFilter === key ? { backgroundColor: "var(--bc-blue)" } : {}}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="px-4 py-3 space-y-2 overflow-y-auto">
+                        {allRecent
+                          .filter((m) => recordFilter === "all" || (recordFilter === "win" ? myWon(m) : !myWon(m)))
+                          .map(renderMatchRow)}
+                      </div>
                     </div>
                   </div>
                 )}
+
+                {/* ⑤ 경기 상세 */}
+                {recordDetailId && (() => {
+                  const m = allRecent.find((x) => x.id === recordDetailId) || matchhistory.find((x) => x.id === recordDetailId);
+                  if (!m) return null;
+                  const won = myWon(m);
+                  const hasScore = matchHasScore(m);
+                  const myDelta = m.skillDeltas && m.skillDeltas[myId];
+                  return (
+                    <div className="fixed inset-0 z-[95] bg-black/40 flex items-center justify-center px-6" onClick={() => setRecordDetailId(null)}>
+                      <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                        <div className="px-4 py-3 flex items-center justify-between" style={{ backgroundColor: "var(--bc-navy)" }}>
+                          <p className="text-white text-sm font-bold">{m.date}{m.time ? ` · ${m.time}` : ""}</p>
+                          <button onClick={() => setRecordDetailId(null)} className="text-white/60 text-xs">✕</button>
+                        </div>
+                        <div className="p-4">
+                          <p className="text-xs text-stone-400 mb-3">{m.court}코트</p>
+                          <div className="rounded-xl p-3 text-center mb-1.5" style={{ backgroundColor: "var(--bc-blue)" }}>
+                            <p className="text-sm font-bold text-white">{(m.teamA || []).map((p) => p.name).join(" + ")}</p>
+                          </div>
+                          <p className="text-center text-xs text-stone-400 my-1 font-bold">VS</p>
+                          <div className="rounded-xl p-3 text-center mt-1.5" style={{ backgroundColor: "var(--bc-orange)" }}>
+                            <p className="text-sm font-bold text-white">{(m.teamB || []).map((p) => p.name).join(" + ")}</p>
+                          </div>
+
+                          <div className="text-center mt-4">
+                            <p className="text-base font-bold" style={won ? { color: "#16A34A" } : { color: "#DC2626" }}>
+                              {won ? "🏆 승리" : "🔴 패배"}
+                            </p>
+                            {hasScore && (
+                              <p className="scorefont text-3xl font-bold text-stone-800 mt-1">{m.scoreA} : {m.scoreB}</p>
+                            )}
+                          </div>
+
+                          {myDelta && (
+                            <div className="mt-4 pt-3 border-t text-center" style={{ borderColor: "var(--bc-line)" }}>
+                              <p className="text-[11px] text-stone-400 mb-1">경기 후 실력점수</p>
+                              <p className="text-sm font-bold text-stone-700">
+                                {myDelta.before} → {myDelta.after}
+                                <span style={myDelta.after >= myDelta.before ? { color: "#16A34A" } : { color: "#DC2626" }}>
+                                  {" "}({myDelta.after >= myDelta.before ? "+" : ""}{myDelta.after - myDelta.before})
+                                </span>
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}
+        </section>
+      )}
 
+      {tab === "ranking" && (
+        <section className="px-5 mt-5 space-y-5">
           {(() => {
             const RANKING_MIN_GAMES = 10; // 최소 10경기 이상부터 정식 랭킹에 반영 (그 전엔 평가중으로 별도 안내, 랭킹에서 제외)
             const withStats = [...players].map((p) => ({ ...p, stats: lifetimeStatsFor(p.id) }));
@@ -2844,7 +3023,7 @@ function App() {
         </section>
       )}
 
-      <BottomNav active="match" />
+      <BottomNav active={tab === "players" ? "match" : tab} />
       <AppModalHost />
     </div>
     </RequireLogin>

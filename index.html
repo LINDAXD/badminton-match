@@ -392,16 +392,22 @@ function App() {
   }
 
   // 내 기록 요약 (실력점수/급수/승률/총경기) — 매칭 화면과 같은 계산 방식
+  function matchWinnerSide(m) {
+    if (m.winner === "A" || m.winner === "B") return m.winner;
+    const sA = Number(m.scoreA), sB = Number(m.scoreB);
+    if (m.scoreA === "" || m.scoreB === "" || isNaN(sA) || isNaN(sB) || sA === sB) return null;
+    return sA > sB ? "A" : "B";
+  }
   function lifetimeStatsFor(id) {
     let games = 0, wins = 0, losses = 0;
     matchhistory.forEach((m) => {
       const inA = (m.teamA || []).some((p) => p.id === id);
       const inB = (m.teamB || []).some((p) => p.id === id);
       if (!inA && !inB) return;
-      if (m.scoreA === "" || m.scoreB === "" || isNaN(Number(m.scoreA)) || isNaN(Number(m.scoreB))) return;
+      const side = matchWinnerSide(m);
+      if (!side) return;
       games++;
-      const sA = Number(m.scoreA), sB = Number(m.scoreB);
-      const won = inA ? sA > sB : sB > sA;
+      const won = (inA && side === "A") || (inB && side === "B");
       if (won) wins++; else losses++;
     });
     return { games, wins, losses };
@@ -414,11 +420,12 @@ function App() {
   const myRecentMatches = myId
     ? matchhistory
         .filter((m) => (m.teamA || []).some((p) => p.id === myId) || (m.teamB || []).some((p) => p.id === myId))
-        .filter((m) => m.scoreA !== "" && m.scoreB !== "" && !isNaN(Number(m.scoreA)) && !isNaN(Number(m.scoreB)))
+        .filter((m) => matchWinnerSide(m) !== null)
         .slice(0, 3)
         .map((m) => {
           const inA = (m.teamA || []).some((p) => p.id === myId);
-          const won = inA ? Number(m.scoreA) > Number(m.scoreB) : Number(m.scoreB) > Number(m.scoreA);
+          const side = matchWinnerSide(m);
+          const won = (inA && side === "A") || (!inA && side === "B");
           return { id: m.id, date: m.date, won };
         })
     : [];
