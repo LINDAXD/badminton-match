@@ -105,19 +105,17 @@ body {
    - 터치 영역 44px+ 확보
    ================================================================== */
 :root {
-  /* ===== Birdie 최종 컬러 시스템: 화이트/배경 70% + 네이비 20% + 청록 10% ===== */
-  --bc-bg: #EAF0F6;         /* Background — 앱 전체 배경 (카드 흰색과 명도차를 벌려 카드가 떠 보이지 않게) */
-  --bc-navy: #1E3A5F;       /* Deep Navy — 메인 브랜드, 제목, 주요 텍스트, 일반 버튼 */
-  --bc-navy-2: #2C4A6E;     /* Blue Navy — 보조 버튼, 아이콘, 그래프, TEAM B */
-  --bc-blue: #1E3A5F;       /* Birdie 강조색 — 네이비로 통일 (텍스트, 테두리, 강조에 사용) */
-  --bc-lime-cta: #1E3A5F;   /* 슈퍼 CTA도 네이비 (하늘색 배경 채우기 금지) */
-  --bc-blue-soft: #E0F7FA;  /* Light Cyan — 선택 카드, 배지, 상태 배경 */
-  --bc-blue-line: #B2E9F2;
-  --bc-orange: #1E3A5F;     /* TEAM A는 네이비 "정보색" — 배경보다 텍스트/아이콘 위주로 사용 */
+  /* ===== Birdie 최종 컬러 시스템: 화이트/배경 70% + 네이비 20% + 그린 10% ===== */
+  --bc-navy: #172B3A;       /* Deep Navy — 제목, 숫자, 아이콘, 일반 버튼 */
+  --bc-blue: #00C853;       /* Birdie Green — 핵심 버튼, 선택 상태, 강조 (쨍하게, 필요한 곳에서만) */
+  --bc-lime-cta: #00C853;   /* 슈퍼 CTA도 동일한 Birdie Green (자동 매칭 시작 등) */
+  --bc-blue-soft: #E0F7E9;  /* Light Green — 선택 카드, 배지, 상태 배경 */
+  --bc-blue-line: #C9EED8;
+  --bc-orange: #172B3A;     /* TEAM A는 네이비 "정보색" — 배경보다 텍스트/아이콘 위주로 사용 */
   --bc-orange-soft: #F7F9F7;
-  --bc-orange-line: #E2E8F0;
-  --bc-line: #E2E8F0;       /* Border — 테두리, 구분선 */
-  --bc-sub: #718096;        /* Secondary — 설명, 날짜, 보조 텍스트 */
+  --bc-orange-line: #E5EAE7;
+  --bc-line: #E5EAE7;       /* Border — 테두리, 구분선 */
+  --bc-sub: #68757D;        /* Secondary — 설명, 날짜, 보조 텍스트 */
 }
 
 /* bc-card was referenced everywhere but never defined — this was the
@@ -127,14 +125,11 @@ body {
   background: #FFFFFF;
   border: 1px solid var(--bc-line);
   border-radius: 16px;
-  /* 가까운 그림자(윤곽) + 먼 그림자(입체감) 두 겹으로 카드가 배경에 눌려 있는 느낌을 줌 */
-  box-shadow:
-    0 1px 2px rgba(16, 24, 40, 0.06),
-    0 8px 20px -6px rgba(30, 58, 95, 0.12);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
 }
 
-/* page background */
-.bc-page-bg { background: var(--bc-bg); }
+/* page background: 살짝 밝은 회색으로 카드가 뜨 보이게 */
+.bc-page-bg { background: var(--bc-bg, #F7F8FA); }
 
 /* 손가락으로 누르기 편한 주요 액션 버튼 (44px+) */
 .bc-btn-lg {
@@ -149,18 +144,18 @@ body {
   transition: transform 0.12s ease, filter 0.12s ease;
 }
 .bc-btn-lg:active { transform: scale(0.98); }
-.bc-btn-primary { background: #FFFFFF; color: var(--bc-navy); border: 1.5px solid var(--bc-navy); }
-.bc-btn-primary:disabled { background: #E5E7EB; color: #ABB1BC; border-color: transparent; }
+.bc-btn-primary { background: var(--bc-blue); color: var(--bc-navy); }
+.bc-btn-primary:disabled { background: #E5E7EB; color: #ABB1BC; }
 
 /* 슈퍼 CTA — Birdie에서 제일 중요한 행동에만 (예: 자동 매칭 시작) */
-.bc-btn-cta { background: #FFFFFF; color: var(--bc-navy); border: 1.5px solid var(--bc-navy); font-weight: 800; }
-.bc-btn-cta:disabled { background: #E5E7EB; color: #ABB1BC; border-color: transparent; }
+.bc-btn-cta { background: var(--bc-lime-cta); color: var(--bc-navy); font-weight: 800; }
+.bc-btn-cta:disabled { background: #E5E7EB; color: #ABB1BC; }
 
 /* 팀 A / 팀 B — 오렌지 대신 라임/네이비 계열로 통일 */
 .bc-team-a { background: var(--bc-orange-soft); border: 1px solid var(--bc-orange-line); }
-.bc-team-b { background: var(--bc-orange-soft); border: 1px solid var(--bc-orange-line); }
+.bc-team-b { background: var(--bc-blue-soft); border: 1px solid var(--bc-blue-line); }
 .bc-team-label-a { color: var(--bc-navy); }
-.bc-team-label-b { color: var(--bc-navy-2); }
+.bc-team-label-b { color: var(--bc-blue); }
 
 /* 상태 배지 */
 .bc-badge2 {
@@ -173,7 +168,7 @@ body {
   font-weight: 800;
   white-space: nowrap;
 }
-.bc-badge2-playing { background: var(--bc-blue-soft); color: var(--bc-blue); }
+.bc-badge2-playing { background: #DCFCE7; color: #16A34A; }
 .bc-badge2-waiting { background: #FEF3C7; color: #B45309; }
 .bc-badge2-empty { background: #F1F5F9; color: #7C8494; }
 .bc-badge2-done { background: #E7E9EE; color: #475569; }
