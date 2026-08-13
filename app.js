@@ -509,7 +509,7 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
                 </div>
               </div>
               <div className="flex gap-2 pt-1">
-                <button onClick={save} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}>저장</button>
+                <button onClick={save} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>저장</button>
                 <button onClick={() => setEdit(false)} className="flex-1 rounded-lg py-2 text-sm font-semibold border border-stone-200 text-stone-500">취소</button>
               </div>
             </div>

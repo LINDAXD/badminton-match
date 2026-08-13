@@ -241,7 +241,7 @@ function App() {
                     <p className="text-[11px] text-stone-400">{req.requestedAt} 신청{req.level ? ` · 희망 레벨 ${req.level}` : ""}</p>
                   </div>
                   <div className="flex gap-1.5">
-                    <button onClick={() => approveRequest(req)} className="text-[11px] font-semibold px-3 py-1.5 rounded-full" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}>
+                    <button onClick={() => approveRequest(req)} className="text-[11px] font-semibold px-3 py-1.5 rounded-full" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
                       승인
                     </button>
                     <button onClick={() => rejectRequest(req)} className="text-[11px] font-semibold text-stone-400 bg-stone-100 px-3 py-1.5 rounded-full">
