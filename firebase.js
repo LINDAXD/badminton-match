@@ -13,6 +13,31 @@ firebase.initializeApp(firebaseConfig);
 
 window.db = firebase.firestore();
 
+// ---- 🧪 테스트 모드 ----
+// 주소 뒤에 ?test=1 을 붙여서 한 번 들어오면, 그때부터 완전히 별도의(비어있는) 테스트 전용 컬렉션을 써요.
+// 실제 회원 데이터가 있는 "badminton" 컬렉션은 테스트 모드 동안 전혀 건드리지 않아요.
+// ?test=0 을 붙여서 한 번 들어오면 다시 실제 데이터로 돌아와요. (브라우저에 저장되니, 다음부턴 그냥 링크만 눌러도 계속 테스트 모드예요)
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("test")) {
+    if (params.get("test") === "0") localStorage.removeItem("birdie_test_mode");
+    else localStorage.setItem("birdie_test_mode", "1");
+  }
+})();
+window.BIRDIE_TEST_MODE = localStorage.getItem("birdie_test_mode") === "1";
+const BC_COLLECTION = window.BIRDIE_TEST_MODE ? "badminton_test" : "badminton";
+
+if (window.BIRDIE_TEST_MODE) {
+  // 실수로 실제 데이터인 줄 알고 조작하는 일이 없도록, 화면 위에 눈에 띄는 배너를 띄워요.
+  window.addEventListener("DOMContentLoaded", () => {
+    const bar = document.createElement("div");
+    bar.textContent = "🧪 테스트 모드 — 실제 데이터가 아니에요 (끄기: 주소 끝에 ?test=0)";
+    bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#B7E600;color:#172B3A;text-align:center;font-size:12px;font-weight:800;padding:6px 8px;";
+    document.body.prepend(bar);
+    document.body.style.paddingTop = "28px";
+  });
+}
+
 // 익명 로그인 — Firestore 보안 규칙에서 "로그인된 사용자만 읽기/쓰기 가능"하게 제한할 수 있도록 해줘요.
 // 회원 이름/비밀번호 방식과는 별개로, 앱이 열리면 자동으로(팝업 없이) 조용히 한 번 로그인돼요.
 // window.authReadyPromise: 각 페이지는 이 약속이 끝날 때까지 화면을 안 띄우고 기다려요.
@@ -39,30 +64,30 @@ window.CLOUDINARY = {
   uploadPreset: "krlvpgfp",
 };
 
-// ---- 공통 Firestore 문서 참조 (컬렉션 "badminton" 유지) ----
+// ---- 공통 Firestore 문서 참조 (테스트 모드일 땐 자동으로 "badminton_test" 컬렉션을 써요) ----
 window.REFS = {
-  roster: db.collection("badminton").doc("roster"),         // 회원 명단
-  notices: db.collection("badminton").doc("notices"),       // 공지사항
-  checkin: db.collection("badminton").doc("checkin"),       // 오늘 참석 체크인
-  restwish: db.collection("badminton").doc("restwish"),     // 랜덤매칭 휴식 희망
-  suggestions: db.collection("badminton").doc("suggestions"), // 건의사항
-  schedule: db.collection("badminton").doc("schedule"),     // 일정
-  checkinlog: db.collection("badminton").doc("checkinlog"), // 출석 이력(출석왕 계산용)
-  reviews: db.collection("badminton").doc("reviews"),       // 모임 후기
-  matchhistory: db.collection("badminton").doc("matchhistory"), // 랜덤매칭 경기 기록 (내 정보용)
-  statsadjust: db.collection("badminton").doc("statsadjust"), // 관리자의 개인 전적 수동 보정값
-  paymentinfo: db.collection("badminton").doc("paymentinfo"), // 대관비 계좌 정보
-  payments: db.collection("badminton").doc("payments"),       // 날짜별 대관비 송금 현황
-  pending: db.collection("badminton").doc("pending"),         // 신규 가입 승인 대기 명단
-  courtmatches: db.collection("badminton").doc("courtmatches"), // 코트별 진행중인 경기 (실시간 공유)
-  matchmode: db.collection("badminton").doc("matchmode"),     // 매칭 모드(랜덤/균형/실력전) + 제외 회원
-  kindvotes: db.collection("badminton").doc("kindvotes"),     // "또 치고싶어요" 익명 투표 (친절왕 집계용)
-  dailyvotes: db.collection("badminton").doc("dailyvotes"),   // 오늘의 MVP/친절왕/분위기메이커/성장왕/베스트플레이 익명 투표
-  noshows: db.collection("badminton").doc("noshows"),         // 노쇼 기록 (자동/관리자 부여)
-  guestlist: db.collection("badminton").doc("guestlist"),     // 가끔 오는 게스트 (날짜별) — 매칭 참석자에 임시로 추가됨
-  shuttlecock: db.collection("badminton").doc("shuttlecock"), // 날짜별 셔틀콕 제출 현황
-  dailylogin: db.collection("badminton").doc("dailylogin"),   // 로그인 기준 "출석" 기록 (모임 "참석"과는 별개)
-  teamqueue: db.collection("badminton").doc("teamqueue"),     // 팀 대기열 (다음/그다음 경기를 미리 짜둔 목록)
+  roster: db.collection(BC_COLLECTION).doc("roster"),         // 회원 명단
+  notices: db.collection(BC_COLLECTION).doc("notices"),       // 공지사항
+  checkin: db.collection(BC_COLLECTION).doc("checkin"),       // 오늘 참석 체크인
+  restwish: db.collection(BC_COLLECTION).doc("restwish"),     // 랜덤매칭 휴식 희망
+  suggestions: db.collection(BC_COLLECTION).doc("suggestions"), // 건의사항
+  schedule: db.collection(BC_COLLECTION).doc("schedule"),     // 일정
+  checkinlog: db.collection(BC_COLLECTION).doc("checkinlog"), // 출석 이력(출석왕 계산용)
+  reviews: db.collection(BC_COLLECTION).doc("reviews"),       // 모임 후기
+  matchhistory: db.collection(BC_COLLECTION).doc("matchhistory"), // 랜덤매칭 경기 기록 (내 정보용)
+  statsadjust: db.collection(BC_COLLECTION).doc("statsadjust"), // 관리자의 개인 전적 수동 보정값
+  paymentinfo: db.collection(BC_COLLECTION).doc("paymentinfo"), // 대관비 계좌 정보
+  payments: db.collection(BC_COLLECTION).doc("payments"),       // 날짜별 대관비 송금 현황
+  pending: db.collection(BC_COLLECTION).doc("pending"),         // 신규 가입 승인 대기 명단
+  courtmatches: db.collection(BC_COLLECTION).doc("courtmatches"), // 코트별 진행중인 경기 (실시간 공유)
+  matchmode: db.collection(BC_COLLECTION).doc("matchmode"),     // 매칭 모드(랜덤/균형/실력전) + 제외 회원
+  kindvotes: db.collection(BC_COLLECTION).doc("kindvotes"),     // "또 치고싶어요" 익명 투표 (친절왕 집계용)
+  dailyvotes: db.collection(BC_COLLECTION).doc("dailyvotes"),   // 오늘의 MVP/친절왕/분위기메이커/성장왕/베스트플레이 익명 투표
+  noshows: db.collection(BC_COLLECTION).doc("noshows"),         // 노쇼 기록 (자동/관리자 부여)
+  guestlist: db.collection(BC_COLLECTION).doc("guestlist"),     // 가끔 오는 게스트 (날짜별) — 매칭 참석자에 임시로 추가됨
+  shuttlecock: db.collection(BC_COLLECTION).doc("shuttlecock"), // 날짜별 셔틀콕 제출 현황
+  dailylogin: db.collection(BC_COLLECTION).doc("dailylogin"),   // 로그인 기준 "출석" 기록 (모임 "참석"과는 별개)
+  teamqueue: db.collection(BC_COLLECTION).doc("teamqueue"),     // 팀 대기열 (다음/그다음 경기를 미리 짜둔 목록)
 };
 
 // ---- 공통 상수 ----
