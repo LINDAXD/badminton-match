@@ -1248,13 +1248,14 @@ function App() {
   }
 
   // 대기열을 최소 2팀까지는 자동으로 채워둬요 — 관리자가 매번 "팀 만들기"를 안 눌러도 되게.
+  // (참석자 체크하는 동안엔 계속 재시도하면서 버벅일 수 있어서, 매칭 탭에 있을 때만 + 충분히 텀을 두고 시도해요)
   useEffect(() => {
-    if (meetingEndedToday || !adminOn) return;
+    if (meetingEndedToday || !adminOn || tab !== "match") return;
     if (teamQueue.length >= 2) return;
     if (priorityPoolForQueue(courtMatches).length < 4) return;
-    const t = setTimeout(() => addTeamToQueue(true), 600);
+    const t = setTimeout(() => addTeamToQueue(true), 2500);
     return () => clearTimeout(t);
-  }, [teamQueue.length, waitingPlayers.length, JSON.stringify(Object.keys(courtMatches)), adminOn, meetingEndedToday]);
+  }, [tab, teamQueue.length, waitingPlayers.length, JSON.stringify(Object.keys(courtMatches)), adminOn, meetingEndedToday]);
 
   function reorderQueue(fromIdx, toIdx) {
     if (toIdx < 0 || toIdx >= teamQueue.length) return;
@@ -1900,11 +1901,8 @@ function App() {
                       <button
                         key={m.id}
                         onClick={() => toggleAttend(m)}
-                        className={`px-3 py-1.5 rounded-full text-sm border transition ${
-                          attending
-                            ? "bg-[var(--bc-blue)] text-[var(--bc-navy)] border-[var(--bc-blue)]"
-                            : "bg-stone-50 text-stone-500 border-stone-200"
-                        }`}
+                        className={`px-3 py-1.5 rounded-full text-sm border transition ${attending ? "" : "bg-stone-50 text-stone-500 border-stone-200"}`}
+                        style={attending ? { backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)", borderColor: "var(--bc-blue)" } : {}}
                       >
                         {m.name}
                       </button>
@@ -1923,21 +1921,22 @@ function App() {
                 }}
                 onKeyDown={(e) => e.key === "Enter" && addRosterMember()}
                 placeholder="새 멤버 이름"
-                className="flex-1 rounded-xl border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--bc-blue)]"
+                className="flex-1 rounded-xl border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300"
               />
               <button
                 onClick={addRosterMember}
-                className="bg-[var(--bc-blue)] text-[var(--bc-navy)] rounded-xl px-4 flex items-center gap-1 active:scale-95 transition"
+                className="rounded-xl px-4 flex items-center gap-1 active:scale-95 transition font-semibold"
+                style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}
               >
                 + 등록
               </button>
             </div>
             {addError && <p className="text-xs text-red-500 mt-1.5">{addError}</p>}
-            <p className="text-[11px] text-[var(--bc-blue)] mt-2">🔄 이 명단은 이제 모두에게 실시간으로 공유돼요.</p>
+            <p className="text-[11px] mt-2" style={{ color: "var(--bc-blue)" }}>🔄 이 명단은 이제 모두에게 실시간으로 공유돼요.</p>
 
             <button
               onClick={() => setShowBackup((v) => !v)}
-              className="text-xs text-[var(--bc-blue)] underline underline-offset-2 mt-3"
+              className="text-xs underline underline-offset-2 mt-3" style={{ color: "var(--bc-blue)" }}
             >
               {showBackup ? "백업/복원 닫기" : "명단 백업/복원하기"}
             </button>
@@ -1956,11 +1955,11 @@ function App() {
                   />
                   <button
                     onClick={copyBackup}
-                    className="mt-2 w-full bg-[var(--bc-blue)] text-[var(--bc-navy)] rounded-lg py-2 text-xs font-semibold"
+                    className="mt-2 w-full rounded-lg py-2 text-xs font-semibold" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}
                   >
                     코드 복사하기
                   </button>
-                  {copyMsg && <p className="text-xs text-[var(--bc-blue)] mt-1">{copyMsg}</p>}
+                  {copyMsg && <p className="text-xs mt-1" style={{ color: "var(--bc-blue)" }}>{copyMsg}</p>}
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-stone-500 mb-1">코드로 복원하기</p>
@@ -1968,7 +1967,7 @@ function App() {
                     value={importText}
                     onChange={(e) => setImportText(e.target.value)}
                     placeholder="붙여넣기: 리리,밍크크,철수"
-                    className="w-full rounded-lg border border-stone-300 px-3 py-2 text-xs h-16 focus:outline-none focus:ring-2 focus:ring-[var(--bc-blue)]"
+                    className="w-full rounded-lg border border-stone-300 px-3 py-2 text-xs h-16 focus:outline-none focus:ring-2 focus:ring-stone-300"
                   />
                   <button
                     onClick={importRoster}
@@ -1976,7 +1975,7 @@ function App() {
                   >
                     복원하기
                   </button>
-                  {importMsg && <p className="text-xs text-[var(--bc-blue)] mt-1">{importMsg}</p>}
+                  {importMsg && <p className="text-xs mt-1" style={{ color: "var(--bc-blue)" }}>{importMsg}</p>}
                 </div>
               </div>
             )}
@@ -2050,7 +2049,7 @@ function App() {
 
           <div>
             <p className="text-sm font-semibold mb-2">오늘 참석자 ({players.length}명)</p>
-            <p className="text-[11px] text-[var(--bc-blue)] mb-1">✅ 더보기 → 일정에서 참석 체크하면 자동으로 여기 반영돼요.</p>
+            <p className="text-[11px] mb-1" style={{ color: "var(--bc-blue)" }}>✅ 더보기 → 일정에서 참석 체크하면 자동으로 여기 반영돼요.</p>
             <p className="text-[11px] text-stone-400 mb-2">🔥상위 · ➖중위 · 🌱하위 등급으로 나눠서, 매칭 생성할 때 자동으로 실력 밸런스를 맞춰요. (최소 {MIN_GAMES_FOR_TIER}경기 이상부터 등급 계산돼요)</p>
             {adminOn && (
               <div className="flex gap-2 mb-3">
@@ -2061,7 +2060,7 @@ function App() {
                   placeholder="가끔 오는 게스트 이름"
                   className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm"
                 />
-                <button onClick={addGuest} className="text-[var(--bc-navy)] rounded-lg px-4 text-sm font-semibold" style={{ backgroundColor: "var(--bc-blue)" }}>
+                <button onClick={addGuest} className="rounded-lg px-4 text-sm font-semibold" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}>
                   게스트 추가
                 </button>
               </div>
@@ -2115,8 +2114,9 @@ function App() {
             disabled={!canGenerate}
             onClick={() => setTab("match")}
             className={`w-full rounded-2xl py-3.5 flex items-center justify-center gap-2 font-semibold headfont uppercase tracking-wide ${
-              canGenerate ? "bg-[var(--bc-blue)] text-[var(--bc-navy)] active:scale-[0.98]" : "bg-stone-200 text-stone-400"
+              canGenerate ? "active:scale-[0.98]" : "bg-stone-200 text-stone-400"
             } transition`}
+            style={canGenerate ? { backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" } : {}}
           >
             🎲 매칭 탭으로 가서 코트별로 시작하기
           </button>
@@ -2528,7 +2528,7 @@ function App() {
                         <button
                           onClick={() => startMatchOnCourt(courtNum)}
                           disabled={waitingPlayers.length < 4}
-                          className="bc-btn-lg w-full font-semibold text-sm bg-[var(--bc-blue)] text-[var(--bc-navy)] active:scale-[0.98] transition disabled:bg-stone-200 disabled:text-stone-400"
+                          className="bc-btn-lg w-full font-semibold text-sm active:scale-[0.98] transition disabled:bg-stone-200 disabled:text-stone-400" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}
                         >
                           🔀 이 코트 경기 시작
                         </button>
@@ -2765,7 +2765,7 @@ function App() {
                         <button
                           onClick={() => startMatchOnCourt(courtNum)}
                           disabled={waitingPlayers.length < 4}
-                          className="bc-btn-lg w-full text-sm font-semibold bg-[var(--bc-blue)] text-[var(--bc-navy)] disabled:bg-stone-200 disabled:text-stone-400"
+                          className="bc-btn-lg w-full text-sm font-semibold disabled:bg-stone-200 disabled:text-stone-400" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}
                         >
                           🔀 이 코트 다음 경기 시작
                         </button>

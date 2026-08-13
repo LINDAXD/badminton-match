@@ -6,14 +6,6 @@ function uid() {
   return Math.random().toString(36).slice(2, 9);
 }
 
-// 경기 시작할 때 팀 4명 중 한 명을 "점수 담당자"로 무작위 지정해요.
-// 관리자가 매번 승패를 물어보지 않아도, 담당자가 경기 끝나고 직접 점수를 기록하도록 하기 위함이에요.
-function pickScorer(teamA, teamB) {
-  const four = [...(teamA || []), ...(teamB || [])];
-  if (four.length === 0) return null;
-  return four[Math.floor(Math.random() * four.length)].id;
-}
-
 function todayStr() {
   // 주의: toISOString()은 UTC 기준이라 한국 시간 자정~오전 9시 사이엔 날짜가 하루 밀려서 나오는 버그가 있었어요.
   // 그래서 로컬(내 폰) 시간 기준으로 직접 조립해요.
@@ -133,8 +125,7 @@ function AppModalHost() {
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && close(inputVal)}
-            className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2"
-            style={{ "--tw-ring-color": "var(--bc-navy)" }}
+            className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-green-500"
           />
         )}
         <div className="flex gap-2">
@@ -149,7 +140,7 @@ function AppModalHost() {
           <button
             onClick={() => close(modal.type === "confirm" ? true : modal.type === "prompt" ? inputVal : true)}
             className="flex-1 rounded-lg py-2 text-sm font-semibold text-white"
-            style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}
+            style={{ backgroundColor: "var(--bc-blue)" }}
           >
             확인
           </button>
@@ -250,10 +241,11 @@ function todayScheduleAttendees(scheduleItems) {
   return [...seen.values()];
 }
 
-// 오늘 참석자 = 관리자가 매칭 페이지 "참석자 관리"에서 등록한 사람(checkinlog에 오늘 날짜로 찍힌 사람)만 기준으로 해요.
-// (예전엔 회원이 직접 일정에서 참석 체크를 했지만, 이제는 참석 등록을 관리자만 해요.)
+// 일정(RSVP)으로 참석 잡힌 사람 + 관리자가 매칭 페이지 "참석자 관리"에서 직접 체크인시킨 사람(checkinlog에 오늘 날짜로 찍힌 사람)을 합쳐요.
+// 체크인 경로가 두 개(일정 RSVP / 관리자 직접 체크인)라서, 한쪽만 보면 실제로 참석했는데도 "참석자 아님"으로 잘못 판단되는 경우가 있었어요.
 function combinedTodayAttendees(scheduleItems, checkinlog, roster) {
   const map = new Map();
+  todayScheduleAttendees(getEffectiveAttendanceEvents(scheduleItems)).forEach((a) => map.set(a.id, a));
   const today = todayStr();
   (checkinlog || []).forEach((c) => {
     if (c.date !== today || map.has(c.memberId)) return;
@@ -469,6 +461,13 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
         <div className="p-5">
           <div className="flex justify-between items-start mb-3">
             <div className="flex items-center gap-3">
+              <div className="w-16 h-16 rounded-full bg-stone-100 flex items-center justify-center overflow-hidden shrink-0">
+                {member.photoUrl ? (
+                  <img src={member.photoUrl} className="w-full h-full object-cover" alt={member.name} />
+                ) : (
+                  <span className="text-2xl">🏸</span>
+                )}
+              </div>
               <div>
                 <p className="text-lg font-bold text-stone-900">{member.name}</p>
                 <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
@@ -479,6 +478,15 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
             </div>
             <button onClick={onClose} className="text-stone-400 text-xl leading-none px-1">✕</button>
           </div>
+
+          {canEdit && (
+            <div className="mb-3">
+              <label className="text-[11px] text-stone-400 underline underline-offset-2 cursor-pointer">
+                📸 프로필 사진 {uploading ? "업로드 중..." : "바꾸기"}
+                <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} disabled={uploading} />
+              </label>
+            </div>
+          )}
 
           {edit ? (
             <div className="space-y-2 mb-4">
@@ -494,14 +502,14 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
                   {SOCIAL_TAGS.map((t) => (
                     <button key={t.key} onClick={() => toggleSocial(t.key)}
                       className={`text-xs px-2.5 py-1.5 rounded-full border ${social[t.key] ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                      style={social[t.key] ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}>
+                      style={social[t.key] ? { backgroundColor: "var(--bc-blue)" } : {}}>
                       {t.emoji} {t.label}
                     </button>
                   ))}
                 </div>
               </div>
               <div className="flex gap-2 pt-1">
-                <button onClick={save} className="flex-1 rounded-lg py-2 text-sm font-semibold text-[var(--bc-navy)]" style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}>저장</button>
+                <button onClick={save} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}>저장</button>
                 <button onClick={() => setEdit(false)} className="flex-1 rounded-lg py-2 text-sm font-semibold border border-stone-200 text-stone-500">취소</button>
               </div>
             </div>
@@ -625,7 +633,7 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
                       key={b.key}
                       onClick={() => toggleManualBadge(b.key)}
                       className={`text-xs px-2.5 py-1.5 rounded-full border tap-scale ${has ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                      style={has ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
+                      style={has ? { backgroundColor: "var(--bc-blue)" } : {}}
                     >
                       {b.emoji} {b.label} {has ? "· 지급됨" : ""}
                     </button>
@@ -792,7 +800,7 @@ function useRoster() {
 // 트랜잭션으로 처리해요 — 다들 거의 동시에 참석 누르는 순간이라 충돌 위험이 제일 큰 곳이에요.
 async function setRsvpFor(item, status, myId, myName) {
   if (!myId) {
-    appAlert("참석 체크를 하려면 먼저 홈에서 닉네임으로 입장해주세요.");
+    appAlert("참석 체크를 하려면 먼저 홈에서 이름으로 입장해주세요.");
     return;
   }
   let wasIn = false;
@@ -857,19 +865,6 @@ function logAttendance(memberId) {
   }).catch(() => {});
 }
 
-// 참석 취소(끄기) 시 오늘 날짜 출석기록을 서버에서도 지워요.
-// (이걸 안 지우면, 참석자 목록을 checkinlog 기준으로 다시 계산할 때 취소한 사람이 도로 나타나요.)
-function removeAttendanceLog(memberId) {
-  if (!memberId) return;
-  const today = todayStr();
-  db.runTransaction(async (tx) => {
-    const snap = await tx.get(REFS.checkinlog);
-    const data = snap.data() || {};
-    const items = (data.items || []).filter((it) => !(it.memberId === memberId && it.date === today));
-    tx.set(REFS.checkinlog, { items });
-  }).catch(() => {});
-}
-
 // ---------- 경기 결과 기록 (내 정보 > 경기 기록용) ----------
 // 여러 코트가 거의 동시에 경기를 끝내도 서로 기록이 안 사라지게, 트랜잭션으로 안전하게 추가해요.
 function logMatchResult(record) {
@@ -892,7 +887,7 @@ function RequireLogin({ myId, children }) {
       <a
         href="./index.html#login"
         className="text-white text-sm font-semibold px-6 py-2.5 rounded-full"
-        style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}
+        style={{ backgroundColor: "var(--bc-blue)" }}
       >
         🏠 홈으로 가서 입장하기
       </a>

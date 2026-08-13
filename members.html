@@ -206,7 +206,7 @@ function App() {
           <button
             onClick={adminOn ? lock : () => tryUnlock()}
             className={`text-[11px] px-3 py-2.5 rounded-xl border whitespace-nowrap ${adminOn ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
-            style={adminOn ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
+            style={adminOn ? { backgroundColor: "var(--bc-blue)" } : {}}
           >
             {adminOn ? "🔓 관리자" : "🔒 관리자"}
           </button>
@@ -219,7 +219,7 @@ function App() {
                 key={t.key}
                 onClick={() => toggleSocialFilter(t.key)}
                 className={`text-[11px] px-2.5 py-1.5 rounded-full border tap-scale ${active ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                style={active ? { backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" } : {}}
+                style={active ? { backgroundColor: "var(--bc-blue)" } : {}}
               >
                 {t.emoji} {t.label}
               </button>
@@ -241,7 +241,7 @@ function App() {
                     <p className="text-[11px] text-stone-400">{req.requestedAt} 신청{req.level ? ` · 희망 레벨 ${req.level}` : ""}</p>
                   </div>
                   <div className="flex gap-1.5">
-                    <button onClick={() => approveRequest(req)} className="text-[11px] font-semibold text-[var(--bc-navy)] px-3 py-1.5 rounded-full" style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}>
+                    <button onClick={() => approveRequest(req)} className="text-[11px] font-semibold px-3 py-1.5 rounded-full" style={{ backgroundColor: "var(--bc-blue)", color: "var(--bc-navy)" }}>
                       승인
                     </button>
                     <button onClick={() => rejectRequest(req)} className="text-[11px] font-semibold text-stone-400 bg-stone-100 px-3 py-1.5 rounded-full">
@@ -275,6 +275,7 @@ function App() {
                   <li key={m.id} className="rise-in bc-card px-4 py-3.5">
                     <div className="flex items-center justify-between">
                       <button onClick={() => setProfileMember(m)} className="text-left tap-scale flex items-center gap-2.5">
+                        <Avatar name={m.name} photoUrl={m.photoUrl} size={36} />
                         <div>
                           <p className="text-sm font-semibold text-stone-800 underline decoration-dotted underline-offset-4">{m.name}</p>
                           <div className="mt-1 flex items-center gap-1.5 flex-wrap">
@@ -353,7 +354,7 @@ function App() {
           <button
             onClick={addMembers}
             className="mt-2 w-full text-white rounded-lg py-2.5 text-sm font-semibold tap-scale"
-            style={{ backgroundColor: "#FFFFFF", border: "1.5px solid var(--bc-navy)", color: "var(--bc-navy)" }}
+            style={{ backgroundColor: "var(--bc-blue)" }}
           >
             등록하기
           </button>
