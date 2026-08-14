@@ -2080,6 +2080,18 @@ function App() {
 
       {tab === "match" && (
         <section className="px-5 mt-5 space-y-4">
+          {/* 오늘 운영 현황 — 매칭 화면 켜자마자 1초 만에 상황 파악 */}
+          <div className="bc-card px-4 py-3">
+            <p className="text-sm font-semibold text-stone-700">
+              🏸 {players.length}명 참석 · <span style={{ color: "var(--bc-blue)" }}>{occupiedIds.size}명 경기 중</span> · {waitingPlayers.length}명 대기
+            </p>
+            {waitingPlayers.length > 0 && (
+              <p className="text-xs text-stone-400 mt-1">
+                다음 코트 → {waitingPlayers.slice(0, 4).map((p) => p.name).join(" · ")}
+              </p>
+            )}
+          </div>
+
           {matchEndSummary && (() => {
             const liveMatch = courtMatches[matchEndSummary.court];
             const hasNext = liveMatch && !liveMatch.done && liveMatch.date === todayStr() && liveMatch.id !== matchEndSummary.matchId;

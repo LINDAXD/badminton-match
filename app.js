@@ -884,7 +884,7 @@ function BottomNav({ active }) {
     { key: "match", href: "./match.html?tab=match", icon: "🔀", label: "매칭" },
     { key: "results", href: "./match.html?tab=results", icon: "📝", label: "경기결과" },
     { key: "ranking", href: "./match.html?tab=ranking", icon: "🏆", label: "랭킹" },
-    { key: "members", href: "./members.html", icon: "👥", label: "회원" },
+    { key: "members", href: "./members.html", icon: "👥", label: "멤버" },
   ];
   return (
     <nav className="bc-bottomnav">

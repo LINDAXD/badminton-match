@@ -149,6 +149,7 @@ function App() {
   const [pending, setPending] = React.useState([]);
   const [checkinlog, setCheckinlog] = React.useState([]);
   const [checkinFlow, setCheckinFlow] = React.useState(null); // 홈 "참석하기" 연속 등록 흐름 상태
+  const [pickSearch, setPickSearch] = React.useState("");
   const [shuttlecockToday, setShuttlecockToday] = React.useState({ submitted: {}, exempt: {}, totalReceived: null, remaining: null });
   React.useEffect(() => {
     const unsub = REFS.shuttlecock.onSnapshot((snap) => {
@@ -430,10 +431,10 @@ function App() {
           <p className="text-[12px] text-stone-400 mt-0.5">오늘도 가볍게, 즐겁게</p>
         </div>
         <a
-          href="./more.html#admin"
+          href="./more.html"
           className="tap-scale w-8 h-8 rounded-full flex items-center justify-center shrink-0 border"
           style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}
-          aria-label="관리자"
+          aria-label="운영 · 더보기"
         >
           ⚙
         </a>
@@ -500,23 +501,35 @@ function App() {
             }
 
             if (checkinFlow.step === "pick") {
+              const q = pickSearch.trim().normalize("NFC");
+              const filtered = q ? roster.filter((m) => (m.name || "").normalize("NFC").includes(q)) : roster;
               return (
                 <>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-bold text-stone-800">누구신가요?</p>
-                    <button onClick={() => setCheckinFlow(null)} className="text-xs text-stone-400">✕ 닫기</button>
+                    <button onClick={() => { setCheckinFlow(null); setPickSearch(""); }} className="text-xs text-stone-400">✕ 닫기</button>
                   </div>
-                  <div className="flex flex-wrap gap-2 max-h-[50vh] overflow-y-auto">
-                    {roster.map((m) => (
+                  <input
+                    autoFocus
+                    value={pickSearch}
+                    onChange={(e) => setPickSearch(e.target.value)}
+                    placeholder="🔎 이름을 검색해주세요"
+                    className="w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-stone-300"
+                  />
+                  <div className="flex flex-wrap gap-2 max-h-[45vh] overflow-y-auto">
+                    {filtered.map((m) => (
                       <button
                         key={m.id}
-                        onClick={() => pickMember(m)}
+                        onClick={() => { pickMember(m); setPickSearch(""); }}
                         className="tap-scale px-4 py-2.5 rounded-full text-sm font-semibold border"
                         style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}
                       >
                         {m.name}
                       </button>
                     ))}
+                    {filtered.length === 0 && (
+                      <p className="text-xs text-stone-400 py-2">일치하는 이름이 없어요.</p>
+                    )}
                   </div>
                 </>
               );
@@ -529,10 +542,7 @@ function App() {
                   <p className="text-sm font-bold text-stone-800 mb-1">{checkinFlow.member.name}님, 지정콕 2개를 제출해주세요.</p>
                   <p className="text-xs text-stone-400 mb-4">제출 완료 후 다음 분을 이어서 등록할 수 있어요.</p>
                   <button onClick={submitShuttlecock} className="bc-btn-lg w-full text-base font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
-                    콕 제출 완료
-                  </button>
-                  <button onClick={() => setCheckinFlow({ step: "done", member: checkinFlow.member, cockDone: false })} className="text-xs text-stone-400 underline underline-offset-2 mt-3">
-                    나중에 낼게요 (참석만 등록)
+                    🏸 콕 2개 제출 완료
                   </button>
                 </div>
               );
@@ -578,22 +588,52 @@ function App() {
         </a>
         <a href="./members.html" className="tap-scale bc-card p-4">
           <p className="text-2xl mb-1">👥</p>
-          <p className="text-sm font-bold text-stone-800">회원</p>
+          <p className="text-sm font-bold text-stone-800">멤버</p>
           <p className="text-[11px] text-stone-400 mt-0.5">회원/점수 확인</p>
         </a>
       </section>
 
-      {/* 오늘의 소식 (생일/신규회원/이달의 수상자를 한 줄씩 돌아가며 보여줘서 안 정신없게) */}
-      {(() => {
-        const items = [];
-        if (meetingEndedDate === todayStr()) items.push({ emoji: "🏁", text: "오늘 모임이 종료됐어요. 수고하셨어요!" });
-        if (birthdayMembers.length > 0) items.push({ emoji: "🎂", text: `오늘은 ${birthdayMembers.map((m) => m.name).join(", ")}님의 생일이에요!` });
-        if (newMembersToday.length > 0) items.push({ emoji: "🎉", text: `${newMembersToday.map((m) => m.name).join(", ")}님, 버디에 오신 걸 환영해요!` });
-        window.VOTE_CATEGORIES.forEach((cat) => {
-          const leader = monthlyLeader(dailyvotesDoc, cat.key, roster);
-          if (leader) items.push({ emoji: cat.emoji, text: `이번 달 ${cat.label}은 ${leader.member.name}님이에요! (매월 1일 새로 집계돼요)` });
-        });
-        return <RotatingBanner items={items} />;
+      {/* 🏸 오늘 경기 — 지금 어느 코트에서 뭐가 진행 중인지 홈에서 바로 확인 */}
+      {Object.keys(courtMatches).length > 0 && (
+        <section className="px-5 max-w-2xl mx-auto mb-4">
+          <div className="bc-card p-4">
+            <p className="text-[11px] font-semibold text-stone-400 mb-2 tracking-wide">🏸 오늘 경기</p>
+            <div className="space-y-2">
+              {Object.entries(courtMatches)
+                .filter(([, m]) => m && m.date === todayStr())
+                .sort((a, b) => Number(a[0]) - Number(b[0]))
+                .slice(0, 4)
+                .map(([court, m]) => (
+                  <div key={court} className="flex items-center justify-between text-sm">
+                    <span className="text-stone-400 shrink-0 w-12">{court}코트</span>
+                    <span className="flex-1 min-w-0 text-stone-700 truncate text-right">
+                      {m.teamA.map((p) => p.name).join("·")} <span className="text-stone-300">vs</span> {m.teamB.map((p) => p.name).join("·")}
+                    </span>
+                    {!m.done && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-2 shrink-0" style={{ backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-blue)" }}>경기중</span>}
+                  </div>
+                ))}
+            </div>
+            <a href="./match.html?tab=results" className="block text-center text-[11px] mt-3" style={{ color: "var(--bc-blue)" }}>전체 경기결과 보기 →</a>
+          </div>
+        </section>
+      )}
+
+      {/* 📊 내 기록 — 마지막으로 참석 체크한 사람 기준 (공용 태블릿이라 "로그인" 개념 없이, 방금 체크인한 사람 기록을 보여줘요) */}
+      {myId && (() => {
+        const s2 = lifetimeStatsFor(myId);
+        if (s2.games === 0) return null;
+        const rate2 = Math.round((s2.wins / s2.games) * 100);
+        return (
+          <section className="px-5 max-w-2xl mx-auto mb-4">
+            <a href="./match.html?tab=record" className="tap-scale bc-card p-4 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-semibold text-stone-400 mb-1 tracking-wide">📊 {myName}님 기록</p>
+                <p className="text-sm text-stone-700">승률 <b style={{ color: "var(--bc-blue)" }}>{rate2}%</b> · {s2.games}경기 · {s2.wins}승</p>
+              </div>
+              <span className="text-stone-300">›</span>
+            </a>
+          </section>
+        );
       })()}
 
 
@@ -742,6 +782,19 @@ function App() {
       )}
 
 
+
+      {/* 오늘의 소식 (생일/신규회원/이달의 수상자를 한 줄씩 돌아가며 보여줘서 안 정신없게) — 핵심 흐름에 안 묻히게 아래쪽으로 내려뒀어요 */}
+      {(() => {
+        const items = [];
+        if (meetingEndedDate === todayStr()) items.push({ emoji: "🏁", text: "오늘 모임이 종료됐어요. 수고하셨어요!" });
+        if (birthdayMembers.length > 0) items.push({ emoji: "🎂", text: `오늘은 ${birthdayMembers.map((m) => m.name).join(", ")}님의 생일이에요!` });
+        if (newMembersToday.length > 0) items.push({ emoji: "🎉", text: `${newMembersToday.map((m) => m.name).join(", ")}님, 버디에 오신 걸 환영해요!` });
+        window.VOTE_CATEGORIES.forEach((cat) => {
+          const leader = monthlyLeader(dailyvotesDoc, cat.key, roster);
+          if (leader) items.push({ emoji: cat.emoji, text: `이번 달 ${cat.label}은 ${leader.member.name}님이에요! (매월 1일 새로 집계돼요)` });
+        });
+        return <RotatingBanner items={items} />;
+      })()}
 
       {/* 오늘의 한마디 */}
       <section className="px-5 max-w-2xl mx-auto mb-8 flex items-center justify-center gap-1.5 text-center">
