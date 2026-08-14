@@ -877,24 +877,6 @@ function logMatchResult(record) {
 }
 
 // ---------- 로그인 필요 화면 (비로그인 접근 제한) ----------
-function RequireLogin({ myId, children }) {
-  if (myId) return children;
-  return (
-    <div className="min-h-screen bg-white flex flex-col items-center justify-center text-center px-8">
-      <p className="text-4xl mb-3">🔒</p>
-      <p className="text-sm font-semibold text-stone-700 mb-1">로그인이 필요해요</p>
-      <p className="text-xs text-stone-400 mb-5">홈 화면에서 이름과 비밀번호로 입장한 뒤 이용할 수 있어요.</p>
-      <a
-        href="./index.html#login"
-        className="text-white text-sm font-semibold px-6 py-2.5 rounded-full"
-        style={{ backgroundColor: "var(--bc-blue)" }}
-      >
-        🏠 홈으로 가서 입장하기
-      </a>
-    </div>
-  );
-}
-
 // ---------- 하단 고정 내비게이션 ----------
 function BottomNav({ active }) {
   const items = [
@@ -1035,3 +1017,40 @@ function Avatar({ name, photoUrl, size }) {
     </div>
   );
 }
+
+// ---------- 에러 발생 시 화면 전체가 하얗게 죽지 않도록 막아주는 안전장치 ----------
+// (예전에 홈 화면 코드 하나가 에러를 내서 앱 전체가 빈 화면이 됐던 사고가 있었어요. 이제 그런 에러가 나도
+//  "문제가 생겼어요" 카드만 뜨고, 새로고침하면 바로 복구할 수 있게 해요.)
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error("Birdie 화면 오류:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center text-center px-8" style={{ backgroundColor: "#F7F9F7" }}>
+          <p className="text-4xl mb-3">🏸</p>
+          <p className="text-sm font-semibold text-stone-700 mb-1">화면을 불러오다 문제가 생겼어요</p>
+          <p className="text-xs text-stone-400 mb-5">새로고침하면 대부분 바로 해결돼요.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="text-white text-sm font-semibold px-6 py-2.5 rounded-full"
+            style={{ backgroundColor: "var(--bc-blue)" }}
+          >
+            🔄 새로고침
+          </button>
+          <a href="./index.html" className="text-xs text-stone-400 underline underline-offset-2 mt-4">홈으로 가기</a>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+window.ErrorBoundary = ErrorBoundary;

@@ -705,7 +705,7 @@ function App() {
 }
 
 window.authReadyPromise.then(() => {
-  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
 });
 </script>
 </body>

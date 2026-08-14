@@ -194,6 +194,15 @@ function App() {
     <div className="min-h-screen bg-white text-stone-800 font-sans pb-24">
       <TopHeader title="👥 회원 관리" subtitle="버디 멤버 명단을 확인하고 관리해요" />
 
+      {myId && (
+        <section className="px-5 max-w-2xl mx-auto mb-2">
+          <a href="./more.html" className="tap-scale bc-card px-4 py-3 flex items-center justify-between">
+            <span className="text-sm font-semibold text-stone-700">🙋 내 정보 · 배지 · 설정</span>
+            <span className="text-stone-300">›</span>
+          </a>
+        </section>
+      )}
+
       <section className="px-5 max-w-2xl mx-auto mb-4">
         <div className="flex items-center gap-2">
           <input
@@ -387,7 +396,7 @@ function App() {
 }
 
 window.authReadyPromise.then(() => {
-  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
 });
 </script>
 </body>
