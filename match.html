@@ -1593,15 +1593,57 @@ function App() {
     if (targets.length === 0) return;
     setBatchStarting(true);
     setBatchDoneMsg("");
-    let count = 0;
-    for (const courtNum of targets) {
-      const ok = await startRandomMatchAsMember(courtNum, { silent: true });
-      if (ok) count++;
-    }
-    setBatchStarting(false);
-    if (count > 0) {
-      setBatchDoneMsg(`🔔 ${count}게임 매칭 완료! 각자 화면에서 배정된 코트를 확인해주세요.`);
-      setTimeout(() => setBatchDoneMsg(""), 6000);
+    try {
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const occupied = new Set();
+        Object.values(current).forEach((m) => {
+          if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id));
+        });
+        // 1) 누가 들어갈지는 공평하게: 오래 기다린 사람 → 오늘 적게 친 사람 순으로 정해요.
+        const priorityPool = players
+          .filter((p) => !occupied.has(p.id) && !restWish[p.id] && !excluded.includes(p.id))
+          .sort((a, b) => {
+            const wa = waitStart[a.id] || 0;
+            const wb = waitStart[b.id] || 0;
+            if (wa !== wb) return wa - wb;
+            return todayGamesPlayed(a.id) - todayGamesPlayed(b.id) || Math.random() - 0.5;
+          });
+        const need = targets.length * 4;
+        const chosen = priorityPool.slice(0, need);
+        if (chosen.length < 4) return { ok: false, count: 0 };
+
+        // 2) 코트에 나눠 넣을 땐, 같은 코트에서 방금 같이 끝난 사람들끼리 다시 뭉치지 않도록
+        //    "몇 번째로 뽑혔는지" 기준으로 라운드로빈으로 흩어서 각 코트에 배분해요.
+        const courtsToFill = targets.slice(0, Math.floor(chosen.length / 4));
+        const groups = courtsToFill.map(() => []);
+        chosen.forEach((p, i) => {
+          if (i < courtsToFill.length * 4) groups[i % courtsToFill.length].push(p);
+        });
+
+        const nextCourts = { ...current };
+        let count = 0;
+        courtsToFill.forEach((courtNum, i) => {
+          const four = groups[i];
+          if (four.length < 4) return;
+          const { a, b } = splitScore(four, matchCtx);
+          nextCourts[courtNum] = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+          count++;
+        });
+        if (count === 0) return { ok: false, count: 0 };
+        tx.set(REFS.courtmatches, { data: nextCourts });
+        return { ok: true, count };
+      });
+      if (result && result.ok) {
+        setBatchDoneMsg(`🔔 ${result.count}게임 매칭 완료! 각자 화면에서 배정된 코트를 확인해주세요.`);
+        setTimeout(() => setBatchDoneMsg(""), 6000);
+      }
+    } catch (e) {
+      appAlert("매칭 생성에 실패했어요. 다시 시도해주세요.");
+    } finally {
+      setBatchStarting(false);
     }
   }
 
