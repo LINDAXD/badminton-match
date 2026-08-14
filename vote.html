@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>오늘의 투표 | Birdie</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="./style.css" />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="./firebase.js"></script>
+</head>
+<body>
+<div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#B0B0B0;font-family:sans-serif;font-size:13px;">🏸 불러오는 중...</div></div>
+<script type="text/babel" src="./app.js"></script>
+<script type="text/babel">
+
+// 이 페이지는 공용 태블릿이 아니라, QR로 개인 휴대폰에서 여는 걸 전제로 만들었어요.
+// 그래서 매칭/코트 같은 운영 정보는 전혀 안 보여주고, 딱 "오늘 누구 뽑을지 투표"만 있어요.
+function App() {
+  const [roster, setRoster] = React.useState([]);
+  const [dailyvotes, setDailyvotes] = React.useState({});
+  const [step, setStep] = React.useState("who"); // who | vote | done
+  const [voterId, setVoterId] = React.useState(null);
+  const [search, setSearch] = React.useState("");
+  const [picks, setPicks] = React.useState({}); // { [categoryKey]: memberId }
+
+  React.useEffect(() => {
+    const unsub = REFS.roster.onSnapshot((snap) => {
+      const data = snap.data();
+      setRoster(data && data.members ? data.members : []);
+    }, () => {});
+    return () => unsub();
+  }, []);
+  React.useEffect(() => {
+    const unsub = REFS.dailyvotes.onSnapshot((snap) => {
+      const data = snap.data();
+      setDailyvotes(data && data.data ? data.data : {});
+    }, () => {});
+    return () => unsub();
+  }, []);
+
+  const today = todayStr();
+  const todayVotes = dailyvotes[today] || {};
+  const alreadyVotedToday = voterId && window.VOTE_CATEGORIES.every((c) => (todayVotes[c.key] || []).some((v) => v.voterId === voterId));
+
+  function submitVotes() {
+    const categories = window.VOTE_CATEGORIES.filter((c) => picks[c.key]);
+    if (categories.length === 0) { setStep("done"); return; }
+    db.runTransaction(async (tx) => {
+      const snap = await tx.get(REFS.dailyvotes);
+      const data = snap.data() || {};
+      const all = data.data || {};
+      const day = { ...(all[today] || {}) };
+      categories.forEach((c) => {
+        const list = (day[c.key] || []).filter((v) => v.voterId !== voterId); // 재투표하면 이전 표는 교체
+        list.push({ voterId, votedForId: picks[c.key] });
+        day[c.key] = list;
+      });
+      tx.set(REFS.dailyvotes, { data: { ...all, [today]: day } });
+    }).catch(() => {}).finally(() => setStep("done"));
+  }
+
+  const q = search.trim().normalize("NFC");
+  const filteredRoster = q ? roster.filter((m) => (m.name || "").normalize("NFC").includes(q)) : roster;
+
+  return (
+    <div className="min-h-screen font-sans" style={{ backgroundColor: "#F7F9F7", color: "#2A2A28" }}>
+      <header className="px-5 pt-8 pb-2 max-w-md mx-auto text-center">
+        <p className="headfont text-xl text-stone-800">🏸 BIRDIE</p>
+        <p className="text-[12px] text-stone-400 mt-0.5">오늘의 투표</p>
+      </header>
+
+      <main className="px-5 py-4 max-w-md mx-auto">
+        {step === "who" && (
+          <div className="bc-card p-5">
+            <p className="text-sm font-bold text-stone-800 mb-1">먼저, 당신은 누구신가요?</p>
+            <p className="text-xs text-stone-400 mb-3">투표하시는 본인 이름을 선택해주세요.</p>
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="🔎 이름 검색"
+              className="w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-stone-300"
+            />
+            <div className="flex flex-wrap gap-2 max-h-[50vh] overflow-y-auto">
+              {filteredRoster.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => { setVoterId(m.id); setStep("vote"); setSearch(""); }}
+                  className="tap-scale px-4 py-2.5 rounded-full text-sm font-semibold border"
+                  style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}
+                >
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {step === "vote" && (() => {
+          const me = roster.find((r) => r.id === voterId);
+          return (
+            <div className="space-y-3">
+              <div className="bc-card p-4 flex items-center justify-between">
+                <p className="text-sm text-stone-600"><b>{me ? me.name : ""}</b>님으로 투표해요</p>
+                <button onClick={() => { setVoterId(null); setStep("who"); setPicks({}); }} className="text-xs text-stone-400 underline underline-offset-2">다른 이름으로</button>
+              </div>
+
+              {alreadyVotedToday && (
+                <div className="bc-card p-3 text-xs text-center" style={{ backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-navy)" }}>
+                  오늘 이미 투표하셨어요. 다시 선택하시면 표가 교체돼요.
+                </div>
+              )}
+
+              {window.VOTE_CATEGORIES.map((c) => (
+                <div key={c.key} className="bc-card p-4">
+                  <p className="text-sm font-bold text-stone-800 mb-2">{c.emoji} {c.label}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {roster.filter((m) => m.id !== voterId).map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => setPicks((p) => ({ ...p, [c.key]: p[c.key] === m.id ? null : m.id }))}
+                        className="tap-scale px-3.5 py-2 rounded-full text-sm font-semibold border"
+                        style={
+                          picks[c.key] === m.id
+                            ? { backgroundColor: "var(--bc-blue)", color: "#fff", borderColor: "var(--bc-blue)" }
+                            : { borderColor: "var(--bc-line)", color: "var(--bc-navy)" }
+                        }
+                      >
+                        {m.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <button
+                onClick={submitVotes}
+                disabled={Object.values(picks).filter(Boolean).length === 0}
+                className="bc-btn-lg w-full text-base font-bold disabled:opacity-40"
+                style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}
+              >
+                투표 완료
+              </button>
+            </div>
+          );
+        })()}
+
+        {step === "done" && (
+          <div className="bc-card p-6 text-center">
+            <p className="text-3xl mb-2">🎉</p>
+            <p className="text-sm font-bold text-stone-800 mb-1">투표해주셔서 감사해요!</p>
+            <p className="text-xs text-stone-400 mb-4">매월 1일 새로 집계돼요. 결과는 회원 프로필에서 확인할 수 있어요.</p>
+            <button
+              onClick={() => { setStep("who"); setVoterId(null); setPicks({}); }}
+              className="text-xs text-stone-400 underline underline-offset-2"
+            >
+              다른 분도 투표하기
+            </button>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+window.authReadyPromise.then(() => {
+  ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
+});
+</script>
+</body>
+</html>

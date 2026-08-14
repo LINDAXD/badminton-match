@@ -416,6 +416,7 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
   const [bio, setBio] = useState(member.bio || "");
   const [career, setCareer] = useState(member.career || "");
   const [activeDay, setActiveDay] = useState(member.activeDay || "");
+  const [birthday, setBirthday] = useState(member.birthday || "");
   const [social, setSocial] = useState(member.social || {});
   const [uploading, setUploading] = useState(false);
 
@@ -438,7 +439,7 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
   }
 
   function save() {
-    onSave({ bio, career, activeDay, social });
+    onSave({ bio, career, activeDay, social, birthday });
     setEdit(false);
   }
 
@@ -492,6 +493,13 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
             <div className="space-y-2 mb-4">
               <textarea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="한 줄 소개" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
               <input value={career} onChange={(e) => setCareer(e.target.value)} placeholder="배드민턴 경력 (예: 2년차)" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+              <input
+                value={birthday}
+                onChange={(e) => setBirthday(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
+                placeholder="생일 MMDD (예: 0524)"
+                maxLength={4}
+                className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+              />
               <select value={activeDay} onChange={(e) => setActiveDay(e.target.value)} className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm">
                 <option value="">주 활동 요일 선택</option>
                 {WEEKDAYS.map((d) => <option key={d} value={d}>{d}요일</option>)}

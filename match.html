@@ -1450,6 +1450,7 @@ function App() {
   const [recordDetailId, setRecordDetailId] = useState(null); // 기록 탭 - 경기 상세 보기
   const [showFullRecords, setShowFullRecords] = useState(false); // 기록 탭 - 전체 경기 기록 보기
   const [recordFilter, setRecordFilter] = useState("all"); // 전체 경기 기록 필터: all | win | loss
+  const [resultsSearch, setResultsSearch] = useState(""); // 경기결과 탭 이름 검색
   const [batchDoneMsg, setBatchDoneMsg] = useState("");
   async function startAllEmptyCourts() {
     if (!myId || batchStarting) return;
@@ -3005,27 +3006,48 @@ function App() {
 
       {tab === "results" && (
         <section className="px-5 mt-5 space-y-3">
-          <p className="text-xs font-bold text-stone-400">📝 오늘의 경기 결과</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-stone-400">📝 {resultsSearch ? "검색 결과" : "오늘의 경기 결과"}</p>
+          </div>
+          <input
+            value={resultsSearch}
+            onChange={(e) => setResultsSearch(e.target.value)}
+            placeholder="🔎 이름으로 검색 (예: 리 → 리가 들어간 경기 전체)"
+            className="w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300"
+          />
           {(() => {
-            const todays = matchhistory.filter((m) => m.date === todayStr());
-            if (todays.length === 0) {
+            const q = resultsSearch.trim().normalize("NFC");
+            const list = q
+              ? matchhistory.filter((m) => [...(m.teamA || []), ...(m.teamB || [])].some((p) => (p.name || "").normalize("NFC").includes(q)))
+              : matchhistory.filter((m) => m.date === todayStr());
+            if (list.length === 0) {
               return (
                 <div className="bc-card px-4 py-8 text-center">
                   <p className="text-3xl mb-2">🏸</p>
-                  <p className="text-sm font-semibold text-stone-600">아직 끝난 경기가 없어요</p>
-                  <p className="text-xs text-stone-400 mt-1">경기가 끝나면 여기에 결과가 쌓여요.</p>
+                  <p className="text-sm font-semibold text-stone-600">{q ? "일치하는 경기가 없어요" : "아직 끝난 경기가 없어요"}</p>
+                  {!q && <p className="text-xs text-stone-400 mt-1">경기가 끝나면 여기에 결과가 쌓여요.</p>}
                 </div>
               );
             }
-            return todays.map((m) => {
+            return list.slice(0, 100).map((m) => {
               const side = matchWinnerSide(m);
               const hasScore = m.scoreA !== "" && m.scoreB !== "" && !isNaN(Number(m.scoreA)) && !isNaN(Number(m.scoreB));
               return (
                 <div key={m.id} className="bc-card p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold text-stone-400">{m.court}코트{m.time ? ` · ${m.time}` : ""}</span>
-                    {hasScore && <span className="scorefont text-sm font-bold text-stone-700">{m.scoreA} : {m.scoreB}</span>}
+                    <span className="text-xs font-bold text-stone-400">{m.date} · {m.court}코트{m.time ? ` · ${m.time}` : ""}</span>
+                    <div className="flex items-center gap-2">
+                      {hasScore && !adminOn && <span className="scorefont text-sm font-bold text-stone-700">{m.scoreA} : {m.scoreB}</span>}
+                      {adminOn && <button onClick={() => deleteMatchRecord(m)} className="text-[11px] text-red-400 underline underline-offset-2">삭제</button>}
+                    </div>
                   </div>
+                  {adminOn && (
+                    <div className="flex items-center justify-center gap-2 mb-3">
+                      <NumberSelect value={m.scoreA === "" ? null : Number(m.scoreA)} onChange={(v) => editMatchRecord(m, "scoreA", v == null ? "" : String(v))} max={30} placeholder="-" unit="" />
+                      <span className="text-stone-400">:</span>
+                      <NumberSelect value={m.scoreB === "" ? null : Number(m.scoreB)} onChange={(v) => editMatchRecord(m, "scoreB", v == null ? "" : String(v))} max={30} placeholder="-" unit="" />
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     <div className={`bc-team-a rounded-xl p-3 ${side === "A" ? "ring-2 ring-offset-1" : ""}`} style={side === "A" ? { "--tw-ring-color": "var(--bc-blue)" } : {}}>
                       <p className="bc-team-label-a text-[10px] font-bold tracking-widest mb-1.5 flex items-center gap-1">A팀 {side === "A" && "🏆"}</p>
@@ -3248,42 +3270,6 @@ function App() {
               </>
             );
           })()}
-
-          <div>
-            <p className="text-sm font-semibold mb-2">📋 경기 기록</p>
-            <p className="text-[11px] text-stone-400 mb-2">저장돼서 새로고침해도 안 사라져요.</p>
-            {matchhistory.length === 0 ? (
-              <p className="text-sm text-stone-400 bg-white rounded-2xl p-5 text-center border border-dashed border-stone-300">
-                아직 종료된 경기가 없어요.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {matchhistory.slice(0, 50).map((m) => (
-                  <li key={m.id} className="bc-card px-4 py-3 text-sm">
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-[11px] text-stone-400">{m.date} · Court {m.court}</p>
-                      {adminOn && (
-                        <button onClick={() => deleteMatchRecord(m)} className="text-[11px] text-red-400 underline underline-offset-2">삭제</button>
-                      )}
-                    </div>
-                    <div className="flex justify-between items-center gap-2">
-                      <span className="truncate">{m.teamA[0].name}·{m.teamA[1].name}</span>
-                      {adminOn ? (
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <NumberSelect value={m.scoreA === "" ? null : Number(m.scoreA)} onChange={(v) => editMatchRecord(m, "scoreA", v == null ? "" : String(v))} max={30} placeholder="-" unit="" />
-                          <span className="text-stone-400">:</span>
-                          <NumberSelect value={m.scoreB === "" ? null : Number(m.scoreB)} onChange={(v) => editMatchRecord(m, "scoreB", v == null ? "" : String(v))} max={30} placeholder="-" unit="" />
-                        </div>
-                      ) : (
-                        <span className="scorefont font-semibold shrink-0">{m.scoreA} : {m.scoreB}</span>
-                      )}
-                      <span className="truncate text-right">{m.teamB[0].name}·{m.teamB[1].name}</span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
         </section>
       )}
 
