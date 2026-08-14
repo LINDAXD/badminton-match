@@ -148,6 +148,16 @@ function App() {
   const [payments, setPayments] = React.useState({});
   const [pending, setPending] = React.useState([]);
   const [checkinlog, setCheckinlog] = React.useState([]);
+  const [checkinFlow, setCheckinFlow] = React.useState(null); // 홈 "참석하기" 연속 등록 흐름 상태
+  const [shuttlecockToday, setShuttlecockToday] = React.useState({ submitted: {}, exempt: {}, totalReceived: null, remaining: null });
+  React.useEffect(() => {
+    const unsub = REFS.shuttlecock.onSnapshot((snap) => {
+      const data = snap.data();
+      const all = (data && data.data) || {};
+      setShuttlecockToday(all[todayStr()] || { submitted: {}, exempt: {}, totalReceived: null, remaining: null });
+    }, () => {});
+    return () => unsub();
+  }, []);
   const [dailyvotesDoc, setDailyvotesDoc] = React.useState({});
   const [courtMatches, setCourtMatches] = React.useState({});
   const [matchhistory, setMatchhistory] = React.useState([]);
@@ -413,97 +423,137 @@ function App() {
 
   return (
     <div className="min-h-screen pb-24 font-sans" style={{ backgroundColor: "#F7F8FA", color: "#2A2A28" }}>
-      {/* 아주 단순한 헤더 — 로고 + 한 줄 태그라인 + 참여 상태 + 관리자 진입 */}
+      {/* 아주 단순한 헤더 — 로고 + 한 줄 태그라인 + 관리자 진입만. 공용 태블릿이라 "누가 로그인했는지"는 헤더에 안 보여줘요 */}
       <header className="px-5 pt-6 pb-2 max-w-2xl mx-auto flex items-center justify-between">
         <div>
           <p className="headfont text-xl text-stone-800">🏸 BIRDIE</p>
           <p className="text-[12px] text-stone-400 mt-0.5">오늘도 가볍게, 즐겁게</p>
         </div>
-        <div className="flex items-center gap-2">
-          {myId ? (
-            <button onClick={logout} className="tap-scale text-[11px] font-semibold px-3 py-1.5 rounded-full shrink-0 border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
-              {myName}님 · 다른 이름으로
-            </button>
-          ) : (
-            <button onClick={() => setShowLoginModal(true)} className="tap-scale text-sm font-bold px-4 py-2 rounded-full shrink-0" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
-              🙋 참여하기
-            </button>
-          )}
-          <a
-            href="./more.html#admin"
-            className="tap-scale w-8 h-8 rounded-full flex items-center justify-center shrink-0 border"
-            style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}
-            aria-label="관리자"
-          >
-            ⚙
-          </a>
-        </div>
+        <a
+          href="./more.html#admin"
+          className="tap-scale w-8 h-8 rounded-full flex items-center justify-center shrink-0 border"
+          style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}
+          aria-label="관리자"
+        >
+          ⚙
+        </a>
       </header>
 
-      {/* 오늘의 모임 — 태블릿을 처음 보는 사람도 3초 안에 "참여하기"를 누를 수 있도록 가장 크게.
-          당일 벙개/공용 태블릿 운영을 고려해서, 관리자가 미리 일정을 안 만들어놔도 그냥 오늘 바로 참여할 수 있어요. */}
+      {/* 오늘의 모임 — 도착한 사람이 이름만 눌러서 빠르게 연속으로 참석+콕 제출까지 끝낼 수 있는 화면.
+          공용 태블릿 전제라 "누가 로그인했는지" 상태를 계속 보여주지 않고, 매번 이름 선택부터 시작해요. */}
       <section className="px-5 max-w-2xl mx-auto mt-3 mb-4">
         <div className="rise-in bc-card p-5">
-          <p className="text-[11px] font-semibold text-stone-400 mb-2 tracking-wide">🏸 오늘의 모임</p>
           {(() => {
             const s = upcomingList.length > 0 ? upcomingList[0] : null;
-            const myStatus = s && myId ? (s.rsvp || []).find((r) => r.id === myId)?.status || null : null;
-            const alreadyIn = s ? myStatus === "in" : !!(myId && iAmInAttendanceSource);
+            const shuttlecockCount = Object.keys((shuttlecockToday && shuttlecockToday.submitted) || {}).length;
 
-            function joinToday() {
-              if (!myId) { setShowLoginModal(true); return; }
-              if (s) {
-                setRsvpFor(s, "in", myId, myName);
-              } else {
-                logAttendance(myId); // 정식 일정 없이 오늘 그냥 바로 참여
-              }
+            function patchShuttlecockToday(patchFn) {
+              db.runTransaction(async (tx) => {
+                const snap = await tx.get(REFS.shuttlecock);
+                const data = snap.data() || {};
+                const all = data.data || {};
+                const today = all[todayStr()] || { submitted: {}, exempt: {}, totalReceived: null, remaining: null };
+                tx.set(REFS.shuttlecock, { data: { ...all, [todayStr()]: patchFn(today) } });
+              }).catch(() => {});
             }
 
-            return (
-              <>
-                <p className="headfont text-2xl text-stone-900">{s ? s.title : "오늘의 모임"}</p>
-                <p className="text-sm text-stone-500 mt-1">
-                  {s ? (
-                    <>{fmtDate(s.date)}{s.time && <> · {fmtTime(s.time)}</>}{s.location ? ` · ${s.location}` : ""}</>
-                  ) : (
-                    new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" })
-                  )}
-                </p>
-                <p className="text-sm mt-2" style={{ color: "var(--bc-blue)" }}>
-                  현재 <b>{attendCount}명</b> 참여 중
-                </p>
+            function pickMember(m) {
+              login(m.id, m.name);
+              if (s) setRsvpFor(s, "in", m.id, m.name); else logAttendance(m.id);
+              const firstTimer = isFirstTimer(m.id);
+              setCheckinFlow({ step: firstTimer ? "done" : "shuttlecock", member: m });
+            }
 
-                {myId && alreadyIn ? (
-                  <div className="bc-btn-lg w-full mt-4 text-sm font-bold" style={{ backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-navy)" }}>
-                    ✅ 참여 완료! 오늘 봐요
-                  </div>
-                ) : (
-                  <button onClick={joinToday} className="bc-btn-lg w-full mt-4 text-base font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
-                    참여하기
-                  </button>
-                )}
+            function submitShuttlecock() {
+              patchShuttlecockToday((today) => ({ ...today, submitted: { ...today.submitted, [checkinFlow.member.id]: true } }));
+              setCheckinFlow({ step: "done", member: checkinFlow.member, cockDone: true });
+            }
 
-                {attendingMembers.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-stone-100 flex flex-wrap gap-1.5">
-                    {attendingMembers.slice(0, 10).map((m) => (
-                      isFirstTimer(m.id) ? (
-                        <StatusPill key={m.id} tone="green">🌱 {m.name}</StatusPill>
-                      ) : (
-                        <span key={m.id} className="text-xs bg-stone-50 border border-stone-200 rounded-full px-2.5 py-1 text-stone-600">{m.name}</span>
-                      )
-                    ))}
-                    {attendingMembers.length > 10 && (
-                      <span className="text-xs text-stone-400 px-1 py-1">+{attendingMembers.length - 10}명 더</span>
+            if (!checkinFlow) {
+              return (
+                <>
+                  <p className="text-[11px] font-semibold text-stone-400 mb-2 tracking-wide">🏸 오늘의 모임</p>
+                  <p className="headfont text-2xl text-stone-900">{s ? s.title : "오늘의 모임"}</p>
+                  <p className="text-sm text-stone-500 mt-1">
+                    {s ? (
+                      <>{fmtDate(s.date)}{s.time && <> · {fmtTime(s.time)}</>}{s.location ? ` · ${s.location}` : ""}</>
+                    ) : (
+                      new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" })
                     )}
-                  </div>
-                )}
+                  </p>
+                  <p className="text-sm mt-2" style={{ color: "var(--bc-blue)" }}>현재 <b>{attendCount}명</b> 참석 중</p>
+                  <p className="text-xs text-stone-400 mt-1">도착하신 분은 아래 버튼을 눌러주세요.</p>
 
-                {!s && (
-                  <a href="./more.html#create" className="block text-center text-[11px] text-stone-400 underline underline-offset-2 mt-3">
-                    정기 모임 일정으로 등록하기 (선택)
-                  </a>
-                )}
-              </>
+                  <button onClick={() => setCheckinFlow({ step: "pick" })} className="bc-btn-lg w-full mt-4 text-lg font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
+                    🟢 참석하기
+                  </button>
+
+                  <p className="text-[11px] text-stone-400 mt-3 text-center">참석자 {attendCount}명 · 콕 제출 {shuttlecockCount}명</p>
+
+                  {!s && (
+                    <a href="./more.html#create" className="block text-center text-[11px] text-stone-400 underline underline-offset-2 mt-2">
+                      정기 모임 일정으로 등록하기 (선택)
+                    </a>
+                  )}
+                </>
+              );
+            }
+
+            if (checkinFlow.step === "pick") {
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-bold text-stone-800">누구신가요?</p>
+                    <button onClick={() => setCheckinFlow(null)} className="text-xs text-stone-400">✕ 닫기</button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 max-h-[50vh] overflow-y-auto">
+                    {roster.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => pickMember(m)}
+                        className="tap-scale px-4 py-2.5 rounded-full text-sm font-semibold border"
+                        style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}
+                      >
+                        {m.name}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              );
+            }
+
+            if (checkinFlow.step === "shuttlecock") {
+              return (
+                <div className="text-center">
+                  <p className="text-2xl mb-2">🏸</p>
+                  <p className="text-sm font-bold text-stone-800 mb-1">{checkinFlow.member.name}님, 지정콕 2개를 제출해주세요.</p>
+                  <p className="text-xs text-stone-400 mb-4">제출 완료 후 다음 분을 이어서 등록할 수 있어요.</p>
+                  <button onClick={submitShuttlecock} className="bc-btn-lg w-full text-base font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
+                    콕 제출 완료
+                  </button>
+                  <button onClick={() => setCheckinFlow({ step: "done", member: checkinFlow.member, cockDone: false })} className="text-xs text-stone-400 underline underline-offset-2 mt-3">
+                    나중에 낼게요 (참석만 등록)
+                  </button>
+                </div>
+              );
+            }
+
+            // step === "done"
+            return (
+              <div className="text-center">
+                <p className="text-2xl mb-2">🎉</p>
+                <p className="text-sm font-bold text-stone-800 mb-1">{checkinFlow.member.name}님, 참석 등록 완료!</p>
+                <p className="text-xs mb-4" style={{ color: "var(--bc-blue)" }}>
+                  ✅ 참석 완료{checkinFlow.cockDone && " · 🏸 콕 제출 완료"}
+                  {checkinFlow.step === "done" && !checkinFlow.cockDone && isFirstTimer(checkinFlow.member.id) && " · 오늘은 콕 제출 없이 참석만 등록했어요"}
+                </p>
+                <button onClick={() => setCheckinFlow({ step: "pick" })} className="bc-btn-lg w-full text-base font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
+                  다음 사람 등록하기
+                </button>
+                <button onClick={() => setCheckinFlow(null)} className="text-xs text-stone-400 underline underline-offset-2 mt-3">
+                  닫기
+                </button>
+              </div>
             );
           })()}
         </div>
