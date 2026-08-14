@@ -334,6 +334,11 @@ function App() {
 
   const pinned = notices.find((n) => n.pinned);
   const preview = pinned || notices[0];
+  // 게임 종료할 때마다 코트별로 남은 콕 개수를 기록해두는데, 그걸 다 더해서 "지금 대략 몇 개 남았는지" 보여줘요.
+  const courtRemainingMap = (shuttlecockToday && shuttlecockToday.courtRemaining) || {};
+  const cockRemainingTotal = Object.keys(courtRemainingMap).length > 0
+    ? Object.values(courtRemainingMap).reduce((sum, n) => sum + Number(n || 0), 0)
+    : null;
   const upcomingList = [...schedule]
     .filter((s) => s.date >= todayStr())
     .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")))
@@ -489,7 +494,10 @@ function App() {
                     🟢 참석하기
                   </button>
 
-                  <p className="text-[11px] text-stone-400 mt-3 text-center">참석자 {attendCount}명 · 콕 제출 {shuttlecockCount}명</p>
+                  <p className="text-[11px] text-stone-400 mt-3 text-center">
+                    참석자 {attendCount}명 · 콕 제출 {shuttlecockCount}명
+                    {cockRemainingTotal != null && <> · 🏸 콕 {cockRemainingTotal}개 남음</>}
+                  </p>
 
                   {!s && (
                     <a href="./more.html#create" className="block text-center text-[11px] text-stone-400 underline underline-offset-2 mt-2">

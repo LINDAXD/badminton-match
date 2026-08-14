@@ -1852,9 +1852,16 @@ function App() {
                       <button
                         key={m.id}
                         onClick={() => toggleAttend(m)}
-                        className={`px-3 py-1.5 rounded-full text-sm border transition ${attending ? "" : "bg-stone-50 text-stone-500 border-stone-200"}`}
-                        style={attending ? { backgroundColor: "var(--bc-blue)", color: "#fff", borderColor: "var(--bc-blue)" } : {}}
+                        className="px-3 py-1.5 rounded-full text-sm border transition flex items-center gap-1"
+                        style={
+                          !attending
+                            ? { backgroundColor: "#fff", color: "#7C8494", borderColor: "var(--bc-line)" }
+                            : occupiedIds.has(m.id)
+                            ? { backgroundColor: "#DBEAFE", color: "#2563EB", borderColor: "#DBEAFE" }
+                            : { backgroundColor: "#DCFCE7", color: "#16A34A", borderColor: "#DCFCE7" }
+                        }
                       >
+                        {attending && <span>{occupiedIds.has(m.id) ? "🔵" : "🟢"}</span>}
                         {m.name}
                       </button>
                     );
@@ -2319,19 +2326,13 @@ function App() {
               const notSubmitted = eligibleCount - submittedCount;
               if (eligibleCount === 0 || notSubmitted <= 0) return null;
               return (
-                <a
-                  href="#shuttlecock-panel"
-                  className="mt-3 flex items-center justify-between rounded-xl px-3 py-2 text-xs border"
-                  style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}
-                >
+                <p className="mt-3 flex items-center justify-between rounded-xl px-3 py-2 text-xs border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
                   <span>🏸 셔틀콕 아직 {notSubmitted}명 제출 안 함</span>
-                  <span className="underline">확인하기 ↓</span>
-                </a>
+                  <span className="text-[10px]">(참석 체크할 때 같이 제출해요)</span>
+                </p>
               );
             })()}
           </div>
-
-          <div id="shuttlecock-panel"><ShuttlecockPanel players={players} myId={myId} adminOn={adminOn} /></div>
 
           {adminOn && <OpsRecommendation waitingPlayers={waitingPlayers} players={players} matchhistory={matchhistory} matchMode={matchMode} isFirstTimer={isFirstTimer} roster={roster} />}
 
@@ -2702,10 +2703,11 @@ function App() {
                     disabled={!canToggle}
                     onClick={() => toggleRestWish(p.id)}
                     className={`px-3 py-1.5 rounded-full text-xs border transition ${
-                      wantsRest ? "bg-stone-800 text-white border-stone-800" : "bg-stone-50 text-stone-500 border-stone-200"
+                      wantsRest ? "" : "bg-stone-50 text-stone-500 border-stone-200"
                     } ${!canToggle ? "opacity-40 cursor-not-allowed" : ""}`}
+                    style={wantsRest ? { backgroundColor: "#F1F5F9", color: "#7C8494", borderColor: "#F1F5F9" } : {}}
                   >
-                    {p.name} {wantsRest ? "· 쉼" : ""}
+                    {wantsRest && "⚪ "}{p.name} {wantsRest ? "· 쉼" : ""}
                   </button>
                 );
               })}

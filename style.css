@@ -173,6 +173,13 @@ body {
 .bc-badge2-empty { background: #F1F5F9; color: #7C8494; }
 .bc-badge2-done { background: #E7E9EE; color: #475569; }
 
+/* 상태 배지 통일: 🟢참석 🟡대기 🔵경기중 ⚪휴식 🔴미제출 */
+.bc-status-attend { background: #DCFCE7; color: #16A34A; }
+.bc-status-wait { background: #FEF3C7; color: #B45309; }
+.bc-status-playing { background: #DBEAFE; color: #2563EB; }
+.bc-status-rest { background: #F1F5F9; color: #7C8494; }
+.bc-status-missing { background: #FEE2E2; color: #DC2626; }
+
 @media (hover: hover) {
   .bc-btn-primary:hover:not(:disabled) { filter: brightness(0.97); }
 }

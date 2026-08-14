@@ -384,7 +384,7 @@ function App() {
           dailyvotes={dailyvotes}
           noshows={noshows}
           onGiveNoShow={giveNoShow}
-          canEdit={adminOn || profileMember.id === myId}
+          canEdit={true}
           isAdmin={adminOn}
           isSelf={profileMember.id === myId}
           onSave={saveProfileFields}
