@@ -958,28 +958,35 @@ function App() {
   }
 
   function setMyRsvp(memberId, status) {
-    const next = { ...rsvp, [memberId]: status };
-    setRsvp(next);
-    CHECKIN_REF.set({ data: next }).catch(() => {});
-    if (status === "in") {
-      logAttendance(memberId);
-      markWaiting([memberId]);
-      // 참석으로 표시하면 자동으로 오늘 참석자(매칭 대상) 명단에도 들어가요 — 따로 또 누를 필요 없어요
-      setPlayers((p) => {
-        if (p.some((x) => x.id === memberId)) return p;
-        const m = roster.find((r) => r.id === memberId);
-        if (!m) return p;
-        return [...p, { id: m.id, name: m.name, gamesPlayed: 0, wins: 0, losses: 0 }];
-      });
-    } else if (status === "out") {
-      setPlayers((p) => p.filter((x) => x.id !== memberId));
-    }
-    // 관리자가 여기서 "고정 멤버"로 직접 체크해도, 더보기 → 일정의 오늘 모임에 정식으로 ✅참석한 것과 똑같이 처리돼요
-    // (일정에도 그 사람 이름이 뜨고, 나중에 참석 기록/통계도 일정 RSVP 기준이랑 일치해요).
-    const todayEvent = schedule.find((s) => s.date === todayStr());
-    if (todayEvent) {
-      const m = roster.find((r) => r.id === memberId);
-      setRsvpFor(todayEvent, status === "in" ? "in" : "out", memberId, m ? m.name : "?");
+    try {
+      const next = { ...rsvp, [memberId]: status };
+      setRsvp(next);
+      CHECKIN_REF.set({ data: next }).catch((e) => console.error("체크인 저장 실패:", e));
+      if (status === "in") {
+        setPlayers((p) => {
+          if (p.some((x) => x.id === memberId)) return p;
+          const m = roster.find((r) => r.id === memberId);
+          if (!m) return p;
+          return [...p, { id: m.id, name: m.name, gamesPlayed: 0, wins: 0, losses: 0 }];
+        });
+        markWaiting([memberId]);
+        try { logAttendance(memberId); } catch (e) { console.error("출석 이력 기록 실패:", e); }
+      } else if (status === "out") {
+        setPlayers((p) => p.filter((x) => x.id !== memberId));
+      }
+      // 관리자가 여기서 "고정 멤버"로 직접 체크해도, 더보기 → 일정의 오늘 모임에 정식으로 ✅참석한 것과 똑같이 처리돼요
+      // (일정에도 그 사람 이름이 뜨고, 나중에 참석 기록/통계도 일정 RSVP 기준이랑 일치해요). 일정이 아직 없으면 그냥 건너뛰어요.
+      try {
+        const todayEvent = schedule.find((s) => s.date === todayStr());
+        if (todayEvent) {
+          const m = roster.find((r) => r.id === memberId);
+          setRsvpFor(todayEvent, status === "in" ? "in" : "out", memberId, m ? m.name : "?");
+        }
+      } catch (e) {
+        console.error("일정 RSVP 동기화 실패(참석 체크 자체는 정상 처리됐어요):", e);
+      }
+    } catch (e) {
+      console.error("참석 체크 처리 중 오류:", e);
     }
   }
 
