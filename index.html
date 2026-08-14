@@ -440,50 +440,45 @@ function App() {
         </div>
       </header>
 
-      {/* 오늘의 모임 — 태블릿을 처음 보는 사람도 3초 안에 "참여하기"를 누를 수 있도록 가장 크게 */}
+      {/* 오늘의 모임 — 태블릿을 처음 보는 사람도 3초 안에 "참여하기"를 누를 수 있도록 가장 크게.
+          당일 벙개/공용 태블릿 운영을 고려해서, 관리자가 미리 일정을 안 만들어놔도 그냥 오늘 바로 참여할 수 있어요. */}
       <section className="px-5 max-w-2xl mx-auto mt-3 mb-4">
         <div className="rise-in bc-card p-5">
           <p className="text-[11px] font-semibold text-stone-400 mb-2 tracking-wide">🏸 오늘의 모임</p>
-          {upcomingList.length === 0 ? (
-            <>
-              <p className="text-sm text-stone-400 mb-4">예정된 모임이 없어요.</p>
-              <a href="./more.html#create" className="bc-btn-lg w-full text-sm font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
-                ➕ 모임 만들기
-              </a>
-            </>
-          ) : (() => {
-            const s = upcomingList[0];
-            const myStatus = myId ? (s.rsvp || []).find((r) => r.id === myId)?.status || null : null;
+          {(() => {
+            const s = upcomingList.length > 0 ? upcomingList[0] : null;
+            const myStatus = s && myId ? (s.rsvp || []).find((r) => r.id === myId)?.status || null : null;
+            const alreadyIn = s ? myStatus === "in" : !!(myId && iAmInAttendanceSource);
+
+            function joinToday() {
+              if (!myId) { setShowLoginModal(true); return; }
+              if (s) {
+                setRsvpFor(s, "in", myId, myName);
+              } else {
+                logAttendance(myId); // 정식 일정 없이 오늘 그냥 바로 참여
+              }
+            }
+
             return (
               <>
-                <p className="headfont text-2xl text-stone-900">{s.title}</p>
+                <p className="headfont text-2xl text-stone-900">{s ? s.title : "오늘의 모임"}</p>
                 <p className="text-sm text-stone-500 mt-1">
-                  {fmtDate(s.date)}{s.time && <> · {fmtTime(s.time)}</>}{s.location ? ` · ${s.location}` : ""}
+                  {s ? (
+                    <>{fmtDate(s.date)}{s.time && <> · {fmtTime(s.time)}</>}{s.location ? ` · ${s.location}` : ""}</>
+                  ) : (
+                    new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" })
+                  )}
                 </p>
                 <p className="text-sm mt-2" style={{ color: "var(--bc-blue)" }}>
                   현재 <b>{attendCount}명</b> 참여 중
                 </p>
 
-                {myId ? (
-                  myStatus === "in" ? (
-                    <div className="bc-btn-lg w-full mt-4 text-sm font-bold" style={{ backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-navy)" }}>
-                      ✅ 참여 완료! 오늘 봐요
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setRsvpFor(s, "in", myId, myName)}
-                      className="bc-btn-lg w-full mt-4 text-base font-bold"
-                      style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}
-                    >
-                      참여하기
-                    </button>
-                  )
+                {myId && alreadyIn ? (
+                  <div className="bc-btn-lg w-full mt-4 text-sm font-bold" style={{ backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-navy)" }}>
+                    ✅ 참여 완료! 오늘 봐요
+                  </div>
                 ) : (
-                  <button
-                    onClick={() => setShowLoginModal(true)}
-                    className="bc-btn-lg w-full mt-4 text-base font-bold"
-                    style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}
-                  >
+                  <button onClick={joinToday} className="bc-btn-lg w-full mt-4 text-base font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
                     참여하기
                   </button>
                 )}
@@ -501,6 +496,12 @@ function App() {
                       <span className="text-xs text-stone-400 px-1 py-1">+{attendingMembers.length - 10}명 더</span>
                     )}
                   </div>
+                )}
+
+                {!s && (
+                  <a href="./more.html#create" className="block text-center text-[11px] text-stone-400 underline underline-offset-2 mt-3">
+                    정기 모임 일정으로 등록하기 (선택)
+                  </a>
                 )}
               </>
             );
