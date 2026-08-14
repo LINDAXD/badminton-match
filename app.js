@@ -900,9 +900,9 @@ function BottomNav({ active }) {
   const items = [
     { key: "home", href: "./index.html", icon: "🏠", label: "홈" },
     { key: "match", href: "./match.html?tab=match", icon: "🔀", label: "매칭" },
-    { key: "record", href: "./match.html?tab=record", icon: "🏸", label: "기록" },
+    { key: "results", href: "./match.html?tab=results", icon: "📝", label: "경기결과" },
     { key: "ranking", href: "./match.html?tab=ranking", icon: "🏆", label: "랭킹" },
-    { key: "more", href: "./more.html", icon: "🙋", label: "마이" },
+    { key: "members", href: "./members.html", icon: "👥", label: "회원" },
   ];
   return (
     <nav className="bc-bottomnav">

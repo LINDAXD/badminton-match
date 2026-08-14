@@ -413,74 +413,124 @@ function App() {
 
   return (
     <div className="min-h-screen pb-24 font-sans" style={{ backgroundColor: "#F7F8FA", color: "#2A2A28" }}>
-      {/* top greeting card — 흰 카드 + 얇은 네이비 포인트만, 화면 전체를 색으로 덮지 않게 */}
-      <header className="px-5 pt-6 pb-5 max-w-2xl mx-auto">
-        <div className="rise-in bc-card p-5 relative overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-1" style={{ backgroundColor: "var(--bc-navy)" }} />
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="headfont text-[22px] leading-tight text-stone-800">
-                {myId ? <>안녕하세요, {myName}님 👋</> : "혼자보다 함께, 버디"}
-              </p>
-              <p className="text-[12px] mt-1 text-stone-400">
-                {new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" })}
-              </p>
-            </div>
-            {myId ? (
-              <button onClick={logout} className="tap-scale text-[11px] font-semibold px-3 py-1.5 rounded-full shrink-0 border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
-                로그아웃
-              </button>
-            ) : (
-              <button onClick={() => setShowLoginModal(true)} className="tap-scale text-sm font-bold px-4 py-2 rounded-full shrink-0" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
-                🔑 로그인
-              </button>
-            )}
-          </div>
-
-          {myId && isRealToday && attendCount > 0 ? (
-            <div className="rounded-2xl p-3.5 grid grid-cols-3 gap-2 text-center" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
-              <div>
-                <p className="headfont text-xl" style={{ color: "var(--bc-navy)" }}>{attendCount}</p>
-                <p className="text-[10px] text-stone-500">오늘 참석</p>
-              </div>
-              <div>
-                <p className="headfont text-xl" style={{ color: "var(--bc-navy)" }}>{activeCourts}</p>
-                <p className="text-[10px] text-stone-500">코트 운영중</p>
-              </div>
-              <div>
-                <p className="headfont text-xl" style={{ color: "var(--bc-navy)" }}>{waitingNow.length}</p>
-                <p className="text-[10px] text-stone-500">현재 대기</p>
-              </div>
-            </div>
-          ) : myId ? (
-            <p className="text-[13px] text-stone-500">오늘도 같이 뛰어요, 우리 버디 🏸</p>
+      {/* 아주 단순한 헤더 — 로고 + 한 줄 태그라인 + 참여 상태 + 관리자 진입 */}
+      <header className="px-5 pt-6 pb-2 max-w-2xl mx-auto flex items-center justify-between">
+        <div>
+          <p className="headfont text-xl text-stone-800">🏸 BIRDIE</p>
+          <p className="text-[12px] text-stone-400 mt-0.5">오늘도 가볍게, 즐겁게</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {myId ? (
+            <button onClick={logout} className="tap-scale text-[11px] font-semibold px-3 py-1.5 rounded-full shrink-0 border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
+              {myName}님 · 다른 이름으로
+            </button>
           ) : (
-            <button
-              onClick={() => setShowLoginModal(true)}
-              className="tap-scale w-full text-center text-sm font-bold py-3 rounded-2xl"
-              style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}
-            >
-              이름으로 입장하기 →
+            <button onClick={() => setShowLoginModal(true)} className="tap-scale text-sm font-bold px-4 py-2 rounded-full shrink-0" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
+              🙋 참여하기
             </button>
           )}
-
-          {myId && isRealToday && attendCount > 0 && nextUp.length > 0 && (
-            <p className="text-[11px] mt-2.5 text-stone-500">🔜 다음 추천: {nextUp.map((p) => p.name).join(", ")}</p>
-          )}
-        </div>
-
-        <div className="flex gap-2 justify-center mt-4">
-          <a href="./more.html#create" className="tap-scale flex-1 text-center text-sm font-bold px-6 py-3.5 rounded-2xl" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
-            ➕ 모임 만들기
-          </a>
-          <a href="./match.html" className="tap-scale flex-1 text-center text-sm font-bold px-6 py-3.5 rounded-2xl border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
-            🎲 랜덤매칭
+          <a
+            href="./more.html#admin"
+            className="tap-scale w-8 h-8 rounded-full flex items-center justify-center shrink-0 border"
+            style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}
+            aria-label="관리자"
+          >
+            ⚙
           </a>
         </div>
-        {myStatusText && (
-          <p className="text-xs mt-2.5 text-center" style={{ color: "var(--bc-blue)" }}>{myStatusText}</p>
-        )}
       </header>
+
+      {/* 오늘의 모임 — 태블릿을 처음 보는 사람도 3초 안에 "참여하기"를 누를 수 있도록 가장 크게 */}
+      <section className="px-5 max-w-2xl mx-auto mt-3 mb-4">
+        <div className="rise-in bc-card p-5">
+          <p className="text-[11px] font-semibold text-stone-400 mb-2 tracking-wide">🏸 오늘의 모임</p>
+          {upcomingList.length === 0 ? (
+            <>
+              <p className="text-sm text-stone-400 mb-4">예정된 모임이 없어요.</p>
+              <a href="./more.html#create" className="bc-btn-lg w-full text-sm font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
+                ➕ 모임 만들기
+              </a>
+            </>
+          ) : (() => {
+            const s = upcomingList[0];
+            const myStatus = myId ? (s.rsvp || []).find((r) => r.id === myId)?.status || null : null;
+            return (
+              <>
+                <p className="headfont text-2xl text-stone-900">{s.title}</p>
+                <p className="text-sm text-stone-500 mt-1">
+                  {fmtDate(s.date)}{s.time && <> · {fmtTime(s.time)}</>}{s.location ? ` · ${s.location}` : ""}
+                </p>
+                <p className="text-sm mt-2" style={{ color: "var(--bc-blue)" }}>
+                  현재 <b>{attendCount}명</b> 참여 중
+                </p>
+
+                {myId ? (
+                  myStatus === "in" ? (
+                    <div className="bc-btn-lg w-full mt-4 text-sm font-bold" style={{ backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-navy)" }}>
+                      ✅ 참여 완료! 오늘 봐요
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setRsvpFor(s, "in", myId, myName)}
+                      className="bc-btn-lg w-full mt-4 text-base font-bold"
+                      style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}
+                    >
+                      참여하기
+                    </button>
+                  )
+                ) : (
+                  <button
+                    onClick={() => setShowLoginModal(true)}
+                    className="bc-btn-lg w-full mt-4 text-base font-bold"
+                    style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}
+                  >
+                    참여하기
+                  </button>
+                )}
+
+                {attendingMembers.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-stone-100 flex flex-wrap gap-1.5">
+                    {attendingMembers.slice(0, 10).map((m) => (
+                      isFirstTimer(m.id) ? (
+                        <StatusPill key={m.id} tone="green">🌱 {m.name}</StatusPill>
+                      ) : (
+                        <span key={m.id} className="text-xs bg-stone-50 border border-stone-200 rounded-full px-2.5 py-1 text-stone-600">{m.name}</span>
+                      )
+                    ))}
+                    {attendingMembers.length > 10 && (
+                      <span className="text-xs text-stone-400 px-1 py-1">+{attendingMembers.length - 10}명 더</span>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      </section>
+
+      {/* 바로가기 2x2 */}
+      <section className="px-5 max-w-2xl mx-auto mb-5 grid grid-cols-2 gap-3">
+        <a href="./match.html?tab=match" className="tap-scale bc-card p-4">
+          <p className="text-2xl mb-1">🏸</p>
+          <p className="text-sm font-bold text-stone-800">매칭</p>
+          <p className="text-[11px] text-stone-400 mt-0.5">오늘 경기 확인</p>
+        </a>
+        <a href="./match.html?tab=ranking" className="tap-scale bc-card p-4">
+          <p className="text-2xl mb-1">🏆</p>
+          <p className="text-sm font-bold text-stone-800">랭킹</p>
+          <p className="text-[11px] text-stone-400 mt-0.5">전체 랭킹 보기</p>
+        </a>
+        <a href="./match.html?tab=record" className="tap-scale bc-card p-4">
+          <p className="text-2xl mb-1">📊</p>
+          <p className="text-sm font-bold text-stone-800">기록</p>
+          <p className="text-[11px] text-stone-400 mt-0.5">경기 기록 보기</p>
+        </a>
+        <a href="./members.html" className="tap-scale bc-card p-4">
+          <p className="text-2xl mb-1">👥</p>
+          <p className="text-sm font-bold text-stone-800">회원</p>
+          <p className="text-[11px] text-stone-400 mt-0.5">회원/점수 확인</p>
+        </a>
+      </section>
 
       {/* 오늘의 소식 (생일/신규회원/이달의 수상자를 한 줄씩 돌아가며 보여줘서 안 정신없게) */}
       {(() => {
@@ -525,12 +575,12 @@ function App() {
         <div className="bc-card p-4">
             <div>
               <div className="flex items-center justify-between">
-                <p className="text-sm"><span className="font-bold" style={{ color: "var(--bc-blue)" }}>{myName}</span>님으로 로그인됨</p>
+                <p className="text-sm"><span className="font-bold" style={{ color: "var(--bc-blue)" }}>{myName}</span>님으로 참여 중</p>
                 <div className="flex items-center gap-3">
                   <button onClick={() => setShowMySettings((v) => !v)} className="text-[11px] text-stone-400 underline underline-offset-2">
                     {showMySettings ? "설정 접기" : "내 설정"}
                   </button>
-                  <button onClick={logout} className="text-xs text-stone-400 underline underline-offset-2">로그아웃</button>
+                  <button onClick={logout} className="text-xs text-stone-400 underline underline-offset-2">다른 이름으로</button>
                 </div>
               </div>
               {showMySettings && (
@@ -640,215 +690,7 @@ function App() {
         </div>
       )}
 
-      {/* upcoming schedule + 참석 인원을 한 카드로 합쳐서 붕 떠보이지 않게 — 참석/미정/불참 버튼을 카드에 바로 넣어서 이동 없이 바로 체크 가능 */}
-      <section className="px-5 max-w-2xl mx-auto mb-4">
-        <div className="rise-in bc-card p-4">
-          <p className="text-[11px] font-semibold text-stone-400 mb-2 tracking-wide">🗓️ 다가오는 모임</p>
-          {upcomingList.length === 0 ? (
-            <p className="text-sm text-stone-400">예정된 일정이 없어요.</p>
-          ) : (
-            <>
-              <div className="flex items-end justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="headfont text-2xl text-stone-900">
-                    {fmtDate(upcomingList[0].date)}
-                    {upcomingList[0].time && <span className="ml-2 text-lg" style={{ color: "var(--bc-blue)" }}>{fmtTime(upcomingList[0].time)}</span>}
-                  </p>
-                  <p className="text-sm text-stone-500 mt-0.5 truncate">{upcomingList[0].title}{upcomingList[0].location ? ` · ${upcomingList[0].location}` : ""}</p>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="headfont text-xl" style={{ color: "var(--bc-blue)" }}>{attendCount}<span className="text-xs text-stone-400 font-normal">명</span></p>
-                  <p className="text-[10px] text-stone-400">{isRealToday ? "오늘 참석" : "참석 예정"}</p>
-                </div>
-              </div>
 
-              {myId && (() => {
-                const s = upcomingList[0];
-                const myStatus = (s.rsvp || []).find((r) => r.id === myId)?.status || null;
-                return (
-                  <div className="grid grid-cols-3 gap-2 mt-3">
-                    <button
-                      onClick={() => setRsvpFor(s, "in", myId, myName)}
-                      className={`text-xs font-semibold py-2 rounded-xl tap-scale ${myStatus === "in" ? "text-white" : "bg-stone-50 text-stone-500 border border-stone-200"}`}
-                      style={myStatus === "in" ? { backgroundColor: "var(--bc-blue)" } : {}}
-                    >
-                      ✅ 참석
-                    </button>
-                    <button
-                      onClick={() => setRsvpFor(s, "maybe", myId, myName)}
-                      className={`text-xs font-semibold py-2 rounded-xl tap-scale ${myStatus === "maybe" ? "text-white" : "bg-stone-50 text-stone-500 border border-stone-200"}`}
-                      style={myStatus === "maybe" ? { backgroundColor: "#B98900" } : {}}
-                    >
-                      ❓ 미정
-                    </button>
-                    <button
-                      onClick={() => setRsvpFor(s, "out", myId, myName)}
-                      className={`text-xs font-semibold py-2 rounded-xl tap-scale ${myStatus === "out" ? "text-white" : "bg-stone-50 text-stone-500 border border-stone-200"}`}
-                      style={myStatus === "out" ? { backgroundColor: "#C0392B" } : {}}
-                    >
-                      ❌ 불참
-                    </button>
-                  </div>
-                );
-              })()}
-
-              <div className="mt-3 pt-3 border-t border-stone-100">
-                {attendingMembers.length === 0 ? (
-                  <p className="text-xs text-stone-400">아직 참석한 사람이 없어요.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {attendingMembers.slice(0, 12).map((m) => (
-                      isFirstTimer(m.id) ? (
-                        <StatusPill key={m.id} tone="green">🌱 {m.name}</StatusPill>
-                      ) : (
-                        <span key={m.id} className="text-xs bg-stone-50 border border-stone-200 rounded-full px-2.5 py-1 text-stone-600">
-                          {m.name}
-                        </span>
-                      )
-                    ))}
-                    {attendingMembers.length > 12 && (
-                      <span className="text-xs text-stone-400 px-1 py-1">+{attendingMembers.length - 12}명 더</span>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {upcomingList.length > 1 && (
-                <ul className="mt-3 pt-3 border-t border-stone-100 space-y-2">
-                  {upcomingList.slice(1).map((s) => (
-                    <li key={s.id} className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-stone-600 truncate">{s.title}</p>
-                      <p className="text-[11px] text-stone-400 shrink-0">
-                        {fmtDate(s.date)}{s.time ? ` · ${fmtTime(s.time)}` : ""}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </div>
-      </section>
-
-      {/* ② 오늘의 매칭 — 내가 지금 뛰고 있으면 코트/상대를 바로 보여줘요 */}
-      {myId && isRealToday && (
-        <section className="px-5 max-w-2xl mx-auto mb-4">
-          <div className="bc-card overflow-hidden">
-            {myCourtInfo ? (
-              <>
-                <div className="px-4 py-3 flex items-center justify-between" style={{ backgroundColor: "var(--bc-navy)" }}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-base">🏸</span>
-                    <p className="text-white font-bold text-base">{myCourtInfo.court}코트</p>
-                  </div>
-                  <span className="bc-badge2 bc-badge2-playing">🟢 게임 진행 중</span>
-                </div>
-                <div className="px-4 pt-4 pb-4">
-                  <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-navy)" }}>
-                    <p className="text-[10px] font-bold tracking-widest mb-1 text-white/70">A팀</p>
-                    <p className="text-base font-bold text-white">나{myCourtInfo.teammate && <> · {myCourtInfo.teammate}</>}</p>
-                  </div>
-                  <p className="text-center text-xs text-stone-400 my-1.5 font-bold">VS</p>
-                  <div className="rounded-xl p-3 text-center" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
-                    <p className="text-[10px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-blue)" }}>B팀</p>
-                    <p className="text-base font-bold" style={{ color: "var(--bc-blue)" }}>{myCourtInfo.opponents.join(" · ")}</p>
-                  </div>
-                  <a href="./match.html" className="bc-btn-lg mt-3 w-full text-sm border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>
-                    매칭 화면에서 보기 →
-                  </a>
-                </div>
-              </>
-            ) : (
-              <div className="p-4 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-stone-700">🕒 매칭 대기 중이에요</p>
-                  <p className="text-xs text-stone-400 mt-0.5">코트가 배정되면 여기서 바로 보여드릴게요.</p>
-                </div>
-                <a href="./match.html" className="text-xs font-bold shrink-0" style={{ color: "var(--bc-blue)" }}>
-                  매칭 화면 →
-                </a>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* ③ 모임 현황 — 작은 카드 4개 */}
-      {isRealToday && attendCount > 0 && (
-        <section className="px-5 max-w-2xl mx-auto mb-4">
-          <div className="grid grid-cols-4 gap-2">
-            <div className="bc-card p-3 text-center">
-              <p className="headfont text-xl text-stone-800">{attendCount}</p>
-              <p className="text-[10px] text-stone-400 mt-0.5">참석자</p>
-            </div>
-            <div className="bc-card p-3 text-center">
-              <p className="headfont text-xl" style={{ color: "var(--bc-blue)" }}>{occupiedIds.size}</p>
-              <p className="text-[10px] text-stone-400 mt-0.5">게임 중</p>
-            </div>
-            <div className="bc-card p-3 text-center">
-              <p className="headfont text-xl" style={{ color: "var(--bc-orange)" }}>{waitingNow.length}</p>
-              <p className="text-[10px] text-stone-400 mt-0.5">대기자</p>
-            </div>
-            <div className="bc-card p-3 text-center">
-              <p className="headfont text-xl text-stone-800">{activeCourts}</p>
-              <p className="text-[10px] text-stone-400 mt-0.5">코트 수</p>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ④ 최근 경기 + ⑤ 내 기록 */}
-      {myId && myLifetimeStats && (
-        <section className="px-5 max-w-2xl mx-auto mb-4">
-          <div className="bc-card p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[11px] font-semibold text-stone-400 tracking-wide">🙋 내 기록</p>
-              {myTier && (
-                <span className="bc-badge2" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
-                  {myStage === "provisional0" ? "🆕 평가중" : myStage === "provisional1" ? "🟡 임시급수" : `${myTier}급`}
-                </span>
-              )}
-            </div>
-            <div className="grid grid-cols-4 gap-2 text-center mb-3">
-              <div>
-                <p className="scorefont text-lg font-bold text-stone-800">{Math.round(mySkillScore)}</p>
-                <p className="text-[10px] text-stone-400 mt-0.5">실력점수</p>
-              </div>
-              <div>
-                <p className="scorefont text-lg font-bold text-stone-800">{myTier || "-"}</p>
-                <p className="text-[10px] text-stone-400 mt-0.5">급수</p>
-              </div>
-              <div>
-                <p className="scorefont text-lg font-bold" style={{ color: "var(--bc-blue)" }}>{myWinRate}%</p>
-                <p className="text-[10px] text-stone-400 mt-0.5">승률</p>
-              </div>
-              <div>
-                <p className="scorefont text-lg font-bold text-stone-800">{myLifetimeStats.games}</p>
-                <p className="text-[10px] text-stone-400 mt-0.5">총 경기</p>
-              </div>
-            </div>
-            {myRecentMatches.length > 0 && (
-              <div className="pt-3 border-t" style={{ borderColor: "var(--bc-line)" }}>
-                <p className="text-[11px] text-stone-400 mb-2">최근 경기</p>
-                <div className="flex gap-2">
-                  {myRecentMatches.map((m) => (
-                    <span
-                      key={m.id}
-                      className="bc-badge2"
-                      style={m.won ? { backgroundColor: "#DCFCE7", color: "#16A34A" } : { backgroundColor: "#FEE2E2", color: "#DC2626" }}
-                    >
-                      {m.won ? "승리" : "패배"}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            <a href="./match.html" className="block text-center text-xs font-semibold mt-3" style={{ color: "var(--bc-blue)" }}>
-              전체 기록 보기 →
-            </a>
-          </div>
-        </section>
-      )}
 
       {/* 오늘의 한마디 */}
       <section className="px-5 max-w-2xl mx-auto mb-8 flex items-center justify-center gap-1.5 text-center">

@@ -215,6 +215,20 @@ function App() {
       }, 150);
     }
   }, [activeView]);
+
+  // 홈에서 ⚙ 관리자 아이콘으로 들어온 경우, 바로 관리자 PIN을 물어보고 성공하면 관리자 화면으로 이동해요
+  const adminHashHandled = React.useRef(false);
+  React.useEffect(() => {
+    if (window.location.hash === "#admin" && !adminHashHandled.current) {
+      adminHashHandled.current = true;
+      if (adminOn) {
+        setActiveView("admin");
+      } else {
+        tryUnlock(() => setActiveView("admin"));
+      }
+    }
+  }, [adminOn]);
+
   const [paymentInfo, setPaymentInfo] = React.useState(null);
   const [payments, setPayments] = React.useState({});
   const [pfBank, setPfBank] = React.useState("");

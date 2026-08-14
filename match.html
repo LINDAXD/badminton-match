@@ -497,7 +497,7 @@ function App() {
   const [tab, setTab] = useState(() => {
     try {
       const q = new URLSearchParams(window.location.search).get("tab");
-      if (["match", "record", "ranking", "players"].includes(q)) return q;
+      if (["match", "record", "ranking", "players", "results"].includes(q)) return q;
     } catch (e) {}
     return "match";
   });
@@ -3177,6 +3177,46 @@ function App() {
                 })()}
               </div>
             );
+          })()}
+        </section>
+      )}
+
+      {tab === "results" && (
+        <section className="px-5 mt-5 space-y-3">
+          <p className="text-xs font-bold text-stone-400">📝 오늘의 경기 결과</p>
+          {(() => {
+            const todays = matchhistory.filter((m) => m.date === todayStr());
+            if (todays.length === 0) {
+              return (
+                <div className="bc-card px-4 py-8 text-center">
+                  <p className="text-3xl mb-2">🏸</p>
+                  <p className="text-sm font-semibold text-stone-600">아직 끝난 경기가 없어요</p>
+                  <p className="text-xs text-stone-400 mt-1">경기가 끝나면 여기에 결과가 쌓여요.</p>
+                </div>
+              );
+            }
+            return todays.map((m) => {
+              const side = matchWinnerSide(m);
+              const hasScore = m.scoreA !== "" && m.scoreB !== "" && !isNaN(Number(m.scoreA)) && !isNaN(Number(m.scoreB));
+              return (
+                <div key={m.id} className="bc-card p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-bold text-stone-400">{m.court}코트{m.time ? ` · ${m.time}` : ""}</span>
+                    {hasScore && <span className="scorefont text-sm font-bold text-stone-700">{m.scoreA} : {m.scoreB}</span>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className={`bc-team-a rounded-xl p-3 ${side === "A" ? "ring-2 ring-offset-1" : ""}`} style={side === "A" ? { "--tw-ring-color": "var(--bc-blue)" } : {}}>
+                      <p className="bc-team-label-a text-[10px] font-bold tracking-widest mb-1.5 flex items-center gap-1">A팀 {side === "A" && "🏆"}</p>
+                      {(m.teamA || []).map((p) => <p key={p.id} className="text-sm font-semibold leading-tight">{p.name}</p>)}
+                    </div>
+                    <div className={`bc-team-b rounded-xl p-3 ${side === "B" ? "ring-2 ring-offset-1" : ""}`} style={side === "B" ? { "--tw-ring-color": "var(--bc-blue)" } : {}}>
+                      <p className="bc-team-label-b text-[10px] font-bold tracking-widest mb-1.5 flex items-center gap-1">B팀 {side === "B" && "🏆"}</p>
+                      {(m.teamB || []).map((p) => <p key={p.id} className="text-sm font-semibold leading-tight">{p.name}</p>)}
+                    </div>
+                  </div>
+                </div>
+              );
+            });
           })()}
         </section>
       )}
