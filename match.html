@@ -544,6 +544,11 @@ function App() {
   const [kindVotes, setKindVotes] = useState([]);
   const [schedule, setSchedule] = useState([]);
   const [myId, setMyId] = useState(() => localStorage.getItem("bm_myId") || null);
+  function login(id, name) {
+    localStorage.setItem("bm_myId", id);
+    localStorage.setItem("bm_myName", name);
+    setMyId(id);
+  }
   const [pinOn, setPinOn] = useState(() => localStorage.getItem("bm_admin") === "1");
   const ADMIN_PIN = window.ADMIN_PIN;
   const adminOn = pinOn || isOfficerOf(roster, myId);
@@ -1899,7 +1904,6 @@ function App() {
 
 
   return (
-    <RequireLogin myId={myId}>
     <div className="min-h-screen bg-white text-stone-900 pb-24 font-sans">
       <TopHeader title="🎲 랜덤매칭" subtitle="오늘 코트 매칭을 만들어봐요" />
 
@@ -2892,6 +2896,25 @@ function App() {
 
       {tab === "record" && (
         <section className="px-5 mt-5 space-y-5">
+          {!myId && (
+            <div className="bc-card p-5 text-center">
+              <p className="text-2xl mb-2">🏸</p>
+              <p className="text-sm font-semibold text-stone-700 mb-1">내 기록을 보려면 이름을 선택해주세요</p>
+              <p className="text-xs text-stone-400 mb-4">비밀번호 없이 이름만 탭하면 바로 볼 수 있어요.</p>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {roster.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => login(m.id, m.name)}
+                    className="tap-scale px-4 py-2 rounded-full text-sm font-semibold border"
+                    style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}
+                  >
+                    {m.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {myId && (() => {
             const s = lifetimeStatsFor(myId);
             const rate = s.games > 0 ? Math.round((s.wins / s.games) * 100) : 0;
@@ -3405,7 +3428,6 @@ function App() {
       <BottomNav active={tab === "players" ? "match" : tab} />
       <AppModalHost />
     </div>
-    </RequireLogin>
   );
 }
 

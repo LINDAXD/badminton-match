@@ -348,7 +348,6 @@ function App() {
   const notifPrefs = { matching: true, result: true, notice: true, ...(me && me.notifPrefs) };
 
   return (
-    <RequireLogin myId={myId}>
     <div className="min-h-screen bg-white text-stone-800 font-sans pb-24">
       <TopHeader title="☰ 더보기" subtitle="버디의 다양한 기능들이에요" />
 
@@ -711,7 +710,6 @@ function App() {
       <BottomNav active="more" />
       <AppModalHost />
     </div>
-    </RequireLogin>
   );
 }
 

@@ -276,38 +276,19 @@ function App() {
     const normalizedName = name.normalize("NFC");
     const existing = roster.find((m) => (m.name || "").trim().normalize("NFC") === normalizedName);
     if (existing) {
-      if (existing.pin) {
-        const pin = await appPrompt(`${name}님, 본인 확인을 위해 비밀번호(숫자 4자리)를 입력해주세요.`, "", { password: true });
-        if (pin === null) return;
-        if (pin !== existing.pin) {
-          setLoginMsg("비밀번호가 일치하지 않아요. 본인이 아니라면 입장할 수 없어요.");
-          return;
-        }
-        login(existing.id, existing.name);
-        setShowLoginModal(false);
-      } else {
-        const pin = await appPrompt(`${name}님, 처음이시네요! 앞으로 본인 확인에 쓸 비밀번호를 설정해주세요.\n(반드시 숫자 4자리로만 입력해주세요. 예: 0524)`, "", { password: true });
-        if (pin === null) return;
-        if (!/^\d{4}$/.test(pin)) { setLoginMsg("비밀번호는 숫자 4자리로만 설정할 수 있어요. 더 길거나 짧으면 안 돼요."); return; }
-        const next = roster.map((m) => (m.id === existing.id ? { ...m, pin } : m));
-        REFS.roster.set({ members: next }).catch(() => {});
-        login(existing.id, existing.name);
-        setShowLoginModal(false);
-        setLoginMsg("비밀번호가 설정됐어요. 다음부턴 이 비밀번호로 입장해주세요.");
-      }
+      // 태블릿 하나를 여럿이 같이 쓰는 상황을 고려해서, 비밀번호 없이 이름만 선택하면 바로 참여돼요.
+      login(existing.id, existing.name);
+      setShowLoginModal(false);
     } else {
       const alreadyPending = pending.some((p) => (p.name || "").normalize("NFC") === normalizedName);
       if (alreadyPending) {
-        setLoginMsg("이미 관리자 승인을 기다리고 있는 이름이에요. 승인되면 로그인할 수 있어요.");
+        setLoginMsg("이미 관리자 승인을 기다리고 있는 이름이에요. 승인되면 참여할 수 있어요.");
         setLoginInput("");
         return;
       }
-      const pin = await appPrompt(`${name}님, 처음 오셨네요! 앞으로 본인 확인에 쓸 비밀번호를 설정해주세요.\n(반드시 숫자 4자리로만 입력해주세요. 예: 0524)`, "", { password: true });
-      if (pin === null) return;
-      if (!/^\d{4}$/.test(pin)) { setLoginMsg("비밀번호는 숫자 4자리로만 설정할 수 있어요. 더 길거나 짧으면 안 돼요."); return; }
-      const req = { id: uid(), name, pin, level: signupLevel, requestedAt: todayStr() };
+      const req = { id: uid(), name, level: signupLevel, requestedAt: todayStr() };
       REFS.pending.set({ items: [...pending, req] }).catch(() => {});
-      setLoginMsg("가입 신청됐어요! 관리자 승인 후 이 이름과 비밀번호로 로그인할 수 있어요. 🙏");
+      setLoginMsg("가입 신청됐어요! 관리자 승인 후 이 이름으로 바로 참여할 수 있어요. 🙏");
     }
     setLoginInput("");
   }
@@ -580,22 +561,56 @@ function App() {
       </section>
 
       {showLoginModal && !myId && (
-        <div className="fixed inset-0 bg-black/50 z-[90] flex items-center justify-center px-6" onClick={() => setShowLoginModal(false)}>
-          <div className="bg-white rounded-2xl p-5 w-full max-w-sm rise-in" onClick={(e) => e.stopPropagation()}>
-            <p className="text-sm font-bold text-stone-800 mb-1">🏸 이름으로 입장하기</p>
-            <p className="text-xs text-stone-400 mb-3">기존 멤버는 이름 그대로, 처음이면 가입 신청 후 관리자 승인을 받아요.</p>
-            <div className="flex gap-2">
-              <input
-                autoFocus
-                value={loginInput}
-                onChange={(e) => { setLoginInput(e.target.value); if (loginMsg) setLoginMsg(""); }}
-                onKeyDown={(e) => e.key === "Enter" && doLogin()}
-                placeholder="이름 입력"
-                className="flex-1 rounded-xl border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2"
-                style={{ "--tw-ring-color": "var(--bc-blue)" }}
-              />
-              <button onClick={doLogin} className="rounded-xl px-4 text-sm font-semibold tap-scale" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>입장</button>
-            </div>
+        <div className="fixed inset-0 bg-black/50 z-[90] flex items-end sm:items-center justify-center" onClick={() => setShowLoginModal(false)}>
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl p-5 w-full max-w-sm max-h-[85vh] flex flex-col rise-in" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm font-bold text-stone-800 mb-1">🏸 참여하기</p>
+            <p className="text-xs text-stone-400 mb-3">내 이름을 찾아서 탭하면 바로 참여돼요. 목록에 없으면 아래에서 새로 등록해주세요.</p>
+            <input
+              autoFocus
+              value={loginInput}
+              onChange={(e) => { setLoginInput(e.target.value); if (loginMsg) setLoginMsg(""); }}
+              placeholder="이름 검색 또는 새 이름 입력"
+              className="w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 mb-2"
+              style={{ "--tw-ring-color": "var(--bc-blue)" }}
+            />
+
+            {(() => {
+              const q = loginInput.trim().normalize("NFC");
+              const matches = q ? roster.filter((m) => (m.name || "").normalize("NFC").includes(q)) : roster;
+              const exact = q && roster.some((m) => (m.name || "").trim().normalize("NFC") === q);
+              return (
+                <>
+                  <div className="flex-1 overflow-y-auto -mx-1 px-1" style={{ maxHeight: "40vh" }}>
+                    <div className="flex flex-wrap gap-2 py-1">
+                      {matches.map((m) => (
+                        <button
+                          key={m.id}
+                          onClick={() => { login(m.id, m.name); setShowLoginModal(false); }}
+                          className="tap-scale px-4 py-2.5 rounded-full text-sm font-semibold border"
+                          style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}
+                        >
+                          {m.name}
+                        </button>
+                      ))}
+                      {matches.length === 0 && (
+                        <p className="text-xs text-stone-400 py-2">일치하는 이름이 없어요. 새로 등록하시려면 아래 버튼을 눌러주세요.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {q && !exact && (
+                    <button
+                      onClick={doLogin}
+                      className="rounded-xl px-4 py-2.5 mt-2 text-sm font-semibold tap-scale"
+                      style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}
+                    >
+                      ➕ "{q}" 새 회원으로 등록 신청
+                    </button>
+                  )}
+                </>
+              );
+            })()}
+
             <div className="flex items-center gap-2 mt-3">
               <span className="text-[11px] text-stone-400 shrink-0">처음이면 내 실력</span>
               <select
@@ -612,7 +627,7 @@ function App() {
               <div
                 className="mt-3 rounded-xl p-3 text-sm font-medium"
                 style={
-                  loginMsg.includes("가입 신청됐어요") || loginMsg.includes("비밀번호가 설정됐어요")
+                  loginMsg.includes("가입 신청됐어요")
                     ? { backgroundColor: "#EAF1FF", color: "var(--bc-navy)" }
                     : { backgroundColor: "#FFF8E1", color: "#B98900" }
                 }
@@ -620,7 +635,6 @@ function App() {
                 {loginMsg}
               </div>
             )}
-            <p className="text-[10px] text-stone-300 mt-2">🔒 다른 사람의 이름으로는 비밀번호 없이 입장할 수 없어요.</p>
             <button onClick={() => setShowLoginModal(false)} className="mt-4 w-full text-xs text-stone-400 underline underline-offset-2">닫기</button>
           </div>
         </div>
