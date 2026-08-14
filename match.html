@@ -1231,11 +1231,18 @@ function App() {
             if (isNearFinish(m)) nearFinishCandidates.push(...m.teamA, ...m.teamB);
           }
         });
-        const waitingPool = waitingPlayers.filter((p) => !occupied.has(p.id) && !alreadyQueued.has(p.id));
+        const freshWaitingPool = players
+          .filter((p) => !occupied.has(p.id) && !alreadyQueued.has(p.id) && !restWish[p.id] && !excluded.includes(p.id))
+          .sort((a, b) => {
+            const wa = waitStart[a.id] || 0;
+            const wb = waitStart[b.id] || 0;
+            if (wa !== wb) return wa - wb;
+            return todayGamesPlayed(a.id) - todayGamesPlayed(b.id) || Math.random() - 0.5;
+          });
         const nearFinishPool = nearFinishCandidates.filter(
-          (p) => !occupied.has(p.id) && !alreadyQueued.has(p.id) && !waitingPool.some((w) => w.id === p.id)
+          (p) => !occupied.has(p.id) && !alreadyQueued.has(p.id) && !freshWaitingPool.some((w) => w.id === p.id)
         );
-        const pool = [...waitingPool, ...nearFinishPool];
+        const pool = [...freshWaitingPool, ...nearFinishPool];
         if (pool.length < 4) return { ok: false, reason: "notEnough" };
         const four = pool.slice(0, 4);
         const { a, b } = splitScore(four, matchCtx);
@@ -1424,7 +1431,17 @@ function App() {
         Object.values(current).forEach((m) => {
           if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id));
         });
-        const pool = waitingPlayers.filter((p) => !occupied.has(p.id));
+        // ⚠️ waitingPlayers(화면에 보이는 값)는 여러 코트를 연달아 자동배정할 때 아직 최신 반영이 안 됐을 수 있어서,
+        // 오늘 참석자 전체(players)에서 지금 이 순간 기준으로 다시 걸러요. 방금 다른 코트에 배정된 사람이
+        // 중복으로 또 뽑히는 걸 이렇게 막아요.
+        const pool = players
+          .filter((p) => !occupied.has(p.id) && !restWish[p.id] && !excluded.includes(p.id))
+          .sort((a, b) => {
+            const wa = waitStart[a.id] || 0;
+            const wb = waitStart[b.id] || 0;
+            if (wa !== wb) return wa - wb;
+            return todayGamesPlayed(a.id) - todayGamesPlayed(b.id) || Math.random() - 0.5;
+          });
         if (pool.length < 4) {
           return { ok: false, reason: "notEnough" };
         }
@@ -1489,9 +1506,16 @@ function App() {
             }
           }
         });
-        const waitingPool = waitingPlayers.filter((p) => !occupied.has(p.id));
-        const nearFinishPool = nearFinishCandidates.filter((p) => !occupied.has(p.id) && !waitingPool.some((w) => w.id === p.id));
-        const pool = [...waitingPool, ...nearFinishPool];
+        const freshWaitingPool = players
+          .filter((p) => !occupied.has(p.id) && !restWish[p.id] && !excluded.includes(p.id))
+          .sort((a, b) => {
+            const wa = waitStart[a.id] || 0;
+            const wb = waitStart[b.id] || 0;
+            if (wa !== wb) return wa - wb;
+            return todayGamesPlayed(a.id) - todayGamesPlayed(b.id) || Math.random() - 0.5;
+          });
+        const nearFinishPool = nearFinishCandidates.filter((p) => !occupied.has(p.id) && !freshWaitingPool.some((w) => w.id === p.id));
+        const pool = [...freshWaitingPool, ...nearFinishPool];
         if (pool.length < 4) {
           return { ok: false, reason: "notEnough" };
         }
@@ -2645,7 +2669,7 @@ function App() {
                               <button onClick={() => cancelQueuedNext(courtNum)} className="text-[11px] text-stone-400 underline underline-offset-2 mt-1">예약 취소</button>
                             )}
                           </div>
-                        ) : extendedPoolCount >= 4 && (
+                        ) : extendedPoolCount >= 4 ? (
                           <button
                             onClick={() => queueNextMatch(courtNum)}
                             disabled={queueBusy === courtNum}
@@ -2654,6 +2678,10 @@ function App() {
                           >
                             {queueBusy === courtNum ? "정하는 중..." : "🔜 다음 경기 미리 정하기"}
                           </button>
+                        ) : (
+                          <p className="text-[11px] text-stone-400 text-center py-1">
+                            대기 인원이 부족해서 아직 다음 경기를 못 정해요 (다른 코트가 먼저 예약해가면 이 코트 몫이 부족할 수 있어요)
+                          </p>
                         )}
 
                         {adminOn && (
