@@ -961,7 +961,7 @@ function App() {
     try {
       const next = { ...rsvp, [memberId]: status };
       setRsvp(next);
-      CHECKIN_REF.set({ data: next }).catch((e) => console.error("체크인 저장 실패:", e));
+      CHECKIN_REF.set({ data: next }).catch((e) => appAlert("체크인 저장 실패: " + (e && e.message ? e.message : e)));
       if (status === "in") {
         setPlayers((p) => {
           if (p.some((x) => x.id === memberId)) return p;
@@ -970,7 +970,7 @@ function App() {
           return [...p, { id: m.id, name: m.name, gamesPlayed: 0, wins: 0, losses: 0 }];
         });
         markWaiting([memberId]);
-        try { logAttendance(memberId); } catch (e) { console.error("출석 이력 기록 실패:", e); }
+        try { logAttendance(memberId); } catch (e) { appAlert("출석 이력 기록 실패: " + (e && e.message ? e.message : e)); }
       } else if (status === "out") {
         setPlayers((p) => p.filter((x) => x.id !== memberId));
       }
@@ -983,10 +983,10 @@ function App() {
           setRsvpFor(todayEvent, status === "in" ? "in" : "out", memberId, m ? m.name : "?");
         }
       } catch (e) {
-        console.error("일정 RSVP 동기화 실패(참석 체크 자체는 정상 처리됐어요):", e);
+        appAlert("일정 RSVP 동기화 실패(참석 체크 자체는 정상 처리됐어요): " + (e && e.message ? e.message : e));
       }
     } catch (e) {
-      console.error("참석 체크 처리 중 오류:", e);
+      appAlert("⚠️ 참석 체크 처리 중 오류: " + (e && e.message ? e.message : String(e)));
     }
   }
 
