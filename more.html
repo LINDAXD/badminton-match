@@ -457,23 +457,6 @@ function App() {
             ]}
           />
 
-          {/* 🏆 오늘의 투표 QR — 공용 태블릿 대신 각자 휴대폰으로 투표하게 */}
-          <section className="px-5 max-w-2xl mx-auto mb-4">
-            <div className="bc-card p-4 text-center">
-              <p className="text-sm font-bold text-stone-800 mb-1">🏆 오늘의 MVP를 뽑아주세요!</p>
-              <p className="text-xs text-stone-400 mb-3">QR을 찍으면 각자 휴대폰에서 이름 선택 후 바로 투표할 수 있어요.</p>
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(window.location.origin + "/vote.html")}`}
-                alt="투표 QR 코드"
-                className="mx-auto rounded-xl border"
-                style={{ borderColor: "var(--bc-line)" }}
-                width={180}
-                height={180}
-              />
-              <p className="text-[11px] text-stone-400 mt-2 break-all">{window.location.origin}/vote.html</p>
-            </div>
-          </section>
-
           {/* ⑥ 개인 공개 설정 + ⑦ 알림 설정 */}
           {myId && (
             <section className="px-5 max-w-2xl mx-auto mb-4 space-y-3">

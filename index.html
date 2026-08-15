@@ -452,6 +452,7 @@ function App() {
           {(() => {
             const s = upcomingList.length > 0 ? upcomingList[0] : null;
             const shuttlecockCount = Object.keys((shuttlecockToday && shuttlecockToday.submitted) || {}).length;
+            const submittedCockTotal = shuttlecockCount * 2; // 지정콕 2개씩 제출하니까, 제출한 사람 수 × 2
 
             function patchShuttlecockToday(patchFn) {
               db.runTransaction(async (tx) => {
@@ -466,8 +467,7 @@ function App() {
             function pickMember(m) {
               login(m.id, m.name);
               if (s) setRsvpFor(s, "in", m.id, m.name); else logAttendance(m.id);
-              const firstTimer = isFirstTimer(m.id);
-              setCheckinFlow({ step: firstTimer ? "done" : "shuttlecock", member: m });
+              setCheckinFlow({ step: "shuttlecock", member: m });
             }
 
             function submitShuttlecock() {
@@ -475,10 +475,18 @@ function App() {
               setCheckinFlow({ step: "done", member: checkinFlow.member, cockDone: true });
             }
 
+            function markFirstTimerExempt() {
+              patchShuttlecockToday((today) => ({ ...today, exempt: { ...today.exempt, [checkinFlow.member.id]: true } }));
+              setCheckinFlow({ step: "done", member: checkinFlow.member, cockDone: false, firstTimer: true });
+            }
+
             if (!checkinFlow) {
               return (
                 <>
-                  <p className="text-[11px] font-semibold text-stone-400 mb-2 tracking-wide">🏸 오늘의 모임</p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[11px] font-semibold text-stone-400 tracking-wide">🏸 오늘의 모임</p>
+                    <p className="text-[11px] font-bold" style={{ color: "var(--bc-blue)" }}>🏸 현재 콕 {submittedCockTotal}개</p>
+                  </div>
                   <p className="headfont text-2xl text-stone-900">{s ? s.title : "오늘의 모임"}</p>
                   <p className="text-sm text-stone-500 mt-1">
                     {s ? (
@@ -496,7 +504,7 @@ function App() {
 
                   <p className="text-[11px] text-stone-400 mt-3 text-center">
                     참석자 {attendCount}명 · 콕 제출 {shuttlecockCount}명
-                    {cockRemainingTotal != null && <> · 🏸 콕 {cockRemainingTotal}개 남음</>}
+                    {cockRemainingTotal != null && <> · 🏸 게임 후 남은 콕 {cockRemainingTotal}개</>}
                   </p>
 
                   {!s && (
@@ -548,9 +556,12 @@ function App() {
                 <div className="text-center">
                   <p className="text-2xl mb-2">🏸</p>
                   <p className="text-sm font-bold text-stone-800 mb-1">{checkinFlow.member.name}님, 지정콕 2개를 제출해주세요.</p>
-                  <p className="text-xs text-stone-400 mb-4">제출 완료 후 다음 분을 이어서 등록할 수 있어요.</p>
+                  <p className="text-xs text-stone-400 mb-4">첫 참석이시면 콕 제출 없이 참석만 등록할 수 있어요.</p>
                   <button onClick={submitShuttlecock} className="bc-btn-lg w-full text-base font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
                     🏸 콕 2개 제출 완료
+                  </button>
+                  <button onClick={markFirstTimerExempt} className="bc-btn-lg w-full mt-2 text-sm font-bold border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}>
+                    🌱 첫 참석이에요 (콕 면제)
                   </button>
                 </div>
               );
@@ -563,7 +574,7 @@ function App() {
                 <p className="text-sm font-bold text-stone-800 mb-1">{checkinFlow.member.name}님, 참석 등록 완료!</p>
                 <p className="text-xs mb-4" style={{ color: "var(--bc-blue)" }}>
                   ✅ 참석 완료{checkinFlow.cockDone && " · 🏸 콕 제출 완료"}
-                  {checkinFlow.step === "done" && !checkinFlow.cockDone && isFirstTimer(checkinFlow.member.id) && " · 오늘은 콕 제출 없이 참석만 등록했어요"}
+                  {!checkinFlow.cockDone && checkinFlow.firstTimer && " · 🌱 콕 제출 없이 참석만 등록했어요"}
                 </p>
                 <button onClick={() => setCheckinFlow({ step: "pick" })} className="bc-btn-lg w-full text-base font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
                   다음 사람 등록하기

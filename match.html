@@ -533,12 +533,14 @@ function App() {
   const [syncMsg, setSyncMsg] = useState("");
   const [rsvp, setRsvp] = useState({});
   const [restWish, setRestWish] = useState({});
+  const [leftEarly, setLeftEarly] = useState({});
+  const [showVoteQr, setShowVoteQr] = useState(null); // null | { reason: "left" | "ended", name? }
   const [matchhistory, setMatchhistory] = useState([]);
   const [statsAdjust, setStatsAdjust] = useState({});
   const [checkinlog, setCheckinlog] = useState([]);
   const [matchMode, setMatchMode] = useState("balance"); // "balance" | "skill"
   const [excluded, setExcluded] = useState([]);
-  const [waitStart, setWaitStart] = useState({});
+  const [benched, setBenched] = useState([]); // 방금 게임에 못 들어가고 밀린 사람들 — 다음 매칭에서 반드시 우선 배정
   const [lockedCourts, setLockedCourts] = useState([]);
   const [skillRankOffset, setSkillRankOffset] = useState(0);
   const [kindVotes, setKindVotes] = useState([]);
@@ -597,6 +599,11 @@ function App() {
       setRestWish(data && data.data ? data.data : {});
     });
 
+    const unsub3b = REFS.leftearly.onSnapshot((snap) => {
+      const data = snap.data();
+      setLeftEarly(data && data.data ? data.data : {});
+    });
+
     const unsub4 = REFS.matchhistory.onSnapshot((snap) => {
       const data = snap.data();
       setMatchhistory(data && data.items ? data.items : []);
@@ -634,7 +641,7 @@ function App() {
       const storedMode = (data && data.mode) || "balance";
       setMatchMode(["random", "social", "balance", "skill"].includes(storedMode) ? storedMode : "balance");
       setExcluded((data && data.excluded) || []);
-      setWaitStart((data && data.waitStart) || {});
+      setBenched((data && data.benched) || []);
       setLockedCourts((data && data.lockedCourts) || []);
       setSkillRankOffset((data && data.skillRankOffset) || 0);
       if (data && data.numCourts) setNumCourts(data.numCourts);
@@ -656,6 +663,7 @@ function App() {
       unsub1();
       unsub2();
       unsub3();
+      unsub3b();
       unsub4();
       unsub5();
       unsub6();
@@ -671,7 +679,7 @@ function App() {
     const next = {
       mode: patch.mode !== undefined ? patch.mode : matchMode,
       excluded: patch.excluded !== undefined ? patch.excluded : excluded,
-      waitStart: patch.waitStart !== undefined ? patch.waitStart : waitStart,
+      benched: patch.benched !== undefined ? patch.benched : benched,
       lockedCourts: patch.lockedCourts !== undefined ? patch.lockedCourts : lockedCourts,
       skillRankOffset: patch.skillRankOffset !== undefined ? patch.skillRankOffset : skillRankOffset,
       numCourts: patch.numCourts !== undefined ? patch.numCourts : numCourts,
@@ -680,7 +688,7 @@ function App() {
     };
     setMatchMode(next.mode);
     setExcluded(next.excluded);
-    setWaitStart(next.waitStart);
+    setBenched(next.benched);
     setLockedCourts(next.lockedCourts);
     setSkillRankOffset(next.skillRankOffset);
     setNumCourts(next.numCourts);
@@ -698,18 +706,13 @@ function App() {
     const warn = notSubmitted > 0 ? `\n\n🏸 아직 셔틀콕 안 낸 사람이 ${notSubmitted}명 있어요.` : "";
     if (!(await appConfirm(`오늘 모임을 마칠까요? 이후 새 경기 시작이 막혀요.${warn}`))) return;
     persistMatchSettings({ meetingEndedDate: todayStr() });
+    setShowVoteQr({ reason: "ended" });
   }
   function reopenTodayMeeting() {
     if (!adminOn) return;
     persistMatchSettings({ meetingEndedDate: null });
   }
 
-  function markWaiting(ids) {
-    const now = Date.now();
-    const nextWait = { ...waitStart };
-    ids.forEach((id) => { nextWait[id] = now; });
-    persistMatchSettings({ waitStart: nextWait });
-  }
 
   function toggleExcluded(id) {
     const next = excluded.includes(id) ? excluded.filter((x) => x !== id) : [...excluded, id];
@@ -974,7 +977,6 @@ function App() {
           if (!m) return p;
           return [...p, { id: m.id, name: m.name, gamesPlayed: 0, wins: 0, losses: 0 }];
         });
-        markWaiting([memberId]);
         try { logAttendance(memberId); } catch (e) { appAlert("출석 이력 기록 실패: " + (e && e.message ? e.message : e)); }
       } else if (status === "out") {
         setPlayers((p) => p.filter((x) => x.id !== memberId));
@@ -1001,6 +1003,19 @@ function App() {
     else next[memberId] = true;
     setRestWish(next);
     RESTWISH_REF.set({ data: next }).catch(() => {});
+  }
+
+  // 오늘 먼저 가는 사람 — 매칭 대상에서 빠지고, 가기 전에 투표 QR을 보여줘요
+  function toggleLeftEarly(member) {
+    const next = { ...leftEarly };
+    if (next[member.id]) {
+      delete next[member.id];
+    } else {
+      next[member.id] = true;
+      setShowVoteQr({ reason: "left", name: member.name });
+    }
+    setLeftEarly(next);
+    REFS.leftearly.set({ data: next }).catch(() => {});
   }
 
   function clearRestWish() {
@@ -1158,14 +1173,14 @@ function App() {
     return Math.max(a, b) >= 15;
   }
 
-  // 대기 중(체크인 했지만 지금 안 뛰고 있는) 선수들 — 오래 쉰 사람 우선, 쉬고 싶어요/제외된 사람은 빠짐
+  // 대기 중(체크인 했지만 지금 안 뛰고 있는) 선수들 — 방금 밀려서 확정된 사람(benched) 먼저, 나머지는 이름순
   const waitingPlayers = players
-    .filter((p) => !occupiedIds.has(p.id) && !restWish[p.id] && !excluded.includes(p.id))
+    .filter((p) => !occupiedIds.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id))
     .sort((a, b) => {
-      const wa = waitStart[a.id] || 0;
-      const wb = waitStart[b.id] || 0;
-      if (wa !== wb) return wa - wb; // 대기 시작이 이를수록(오래 쉬었을수록) 우선
-      return todayGamesPlayed(a.id) - todayGamesPlayed(b.id) || Math.random() - 0.5;
+      const ba = benched.includes(a.id) ? 0 : 1;
+      const bb = benched.includes(b.id) ? 0 : 1;
+      if (ba !== bb) return ba - bb;
+      return a.name.localeCompare(b.name, "ko");
     });
 
   // "직접 4명 선택"할 때는 "쉬고 싶어요"/제외 표시와 상관없이, 지금 다른 경기 중이 아닌
@@ -1182,6 +1197,25 @@ function App() {
   const extendedPoolCount = waitingPlayers.length + [...nearFinishPlayerIds].filter((id) => !waitingPlayers.some((w) => w.id === id)).length;
 
   const matchCtx = { hist, skillOf, mode: matchMode, todayPairCount, isFirstTimer, isKindOrStrong };
+
+  // 대기 시간 대신: "방금 게임에 못 들어간 사람"을 다음 매칭에서 반드시 우선 배정하고, 나머지는 랜덤으로 뽑아요.
+  function shuffleArr(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+  function pickFromPool(pool, need) {
+    const guaranteed = shuffleArr(pool.filter((p) => benched.includes(p.id)));
+    const rest = shuffleArr(pool.filter((p) => !benched.includes(p.id)));
+    return [...guaranteed, ...rest].slice(0, need);
+  }
+  function updateBenchedAfterPick(pool, pickedIds) {
+    const newBenched = pool.map((p) => p.id).filter((id) => !pickedIds.includes(id));
+    persistMatchSettings({ benched: newBenched });
+  }
 
   // 나 지금 뭐 하고 있는지 — 코트 하나하나 뒤질 필요 없이 한눈에 보여주기 위한 계산이에요.
   const myStatus = (() => {
@@ -1298,25 +1332,18 @@ function App() {
         // ⚠️ waitingPlayers(화면에 보이는 값)는 여러 코트를 연달아 자동배정할 때 아직 최신 반영이 안 됐을 수 있어서,
         // 오늘 참석자 전체(players)에서 지금 이 순간 기준으로 다시 걸러요. 방금 다른 코트에 배정된 사람이
         // 중복으로 또 뽑히는 걸 이렇게 막아요.
-        const pool = players
-          .filter((p) => !occupied.has(p.id) && !restWish[p.id] && !excluded.includes(p.id))
-          .sort((a, b) => {
-            const wa = waitStart[a.id] || 0;
-            const wb = waitStart[b.id] || 0;
-            if (wa !== wb) return wa - wb;
-            return todayGamesPlayed(a.id) - todayGamesPlayed(b.id) || Math.random() - 0.5;
-          });
+        const pool = players.filter((p) => !occupied.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
         if (pool.length < 4) {
           return { ok: false, reason: "notEnough" };
         }
-        // 오래 기다린 사람 우선으로 4명을 뽑아요 (판수가 골고루 돌아가게) — waitingPlayers가 이미 대기 시작 순서로 정렬돼 있어요.
+        // 방금 게임에 못 들어가고 밀린 사람은 이번엔 반드시 포함, 나머지는 랜덤으로 채워요.
         // 팀을 나눌 때는 최근 파트너/상대 겹침을 피하는 쪽으로 똑똑하게 골라요.
-        const four = pool.slice(0, 4);
+        const four = pickFromPool(pool, 4);
         const { a, b } = splitScore(four, matchCtx);
         const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
         const next = { ...current, [courtNum]: match };
         tx.set(REFS.courtmatches, { data: next });
-        return { ok: true };
+        return { ok: true, pool, pickedIds: four.map((p) => p.id) };
       });
       if (result && result.ok === false) {
         if (!silent) {
@@ -1325,6 +1352,7 @@ function App() {
         }
         return false;
       } else {
+        if (result && result.pool) updateBenchedAfterPick(result.pool, result.pickedIds);
         setJustShuffled(true);
         setTimeout(() => setJustShuffled(false), 500);
         return true;
@@ -1370,29 +1398,24 @@ function App() {
             }
           }
         });
-        const freshWaitingPool = players
-          .filter((p) => !occupied.has(p.id) && !restWish[p.id] && !excluded.includes(p.id))
-          .sort((a, b) => {
-            const wa = waitStart[a.id] || 0;
-            const wb = waitStart[b.id] || 0;
-            if (wa !== wb) return wa - wb;
-            return todayGamesPlayed(a.id) - todayGamesPlayed(b.id) || Math.random() - 0.5;
-          });
+        const freshWaitingPool = players.filter((p) => !occupied.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
         const nearFinishPool = nearFinishCandidates.filter((p) => !occupied.has(p.id) && !freshWaitingPool.some((w) => w.id === p.id));
         const pool = [...freshWaitingPool, ...nearFinishPool];
         if (pool.length < 4) {
           return { ok: false, reason: "notEnough" };
         }
-        const four = pool.slice(0, 4);
+        const four = pickFromPool(pool, 4);
         const { a, b } = splitScore(four, matchCtx);
         const queued = { teamA: a, teamB: b };
         const nextData = { ...current, [courtNum]: { ...existing, next: queued } };
         tx.set(REFS.courtmatches, { data: nextData });
-        return { ok: true };
+        return { ok: true, freshWaitingPool, pickedIds: four.map((p) => p.id) };
       });
       if (result && result.ok === false) {
         if (result.reason === "notEnough") appAlert("대기 중인 인원이 4명 미만이에요.");
         else if (result.reason === "alreadyQueued") appAlert("이미 다음 경기가 정해져 있어요.");
+      } else if (result && result.freshWaitingPool) {
+        updateBenchedAfterPick(result.freshWaitingPool, result.pickedIds);
       }
     } catch (e) {
       appAlert("다음 경기 예약에 실패했어요. 다시 시도해주세요.");
@@ -1422,6 +1445,13 @@ function App() {
     const m = courtMatches[n];
     return !m || m.done || m.date !== todayStr();
   });
+
+  // 참석 인원에 맞춰 코트 수를 자동으로 맞춰요 (9명→2코트, 13명→3코트 …). 관리자가 켜져있을 때만, 값이 실제로 다를 때만 저장해요.
+  useEffect(() => {
+    if (!adminOn || meetingEndedToday) return;
+    const recommended = Math.max(1, Math.floor(players.length / 4));
+    if (recommended !== numCourts) persistMatchSettings({ numCourts: recommended });
+  }, [players.length, adminOn, meetingEndedToday]);
 
   const autoStartInFlight = useRef(false);
   useEffect(() => {
@@ -1467,17 +1497,10 @@ function App() {
         Object.values(current).forEach((m) => {
           if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id));
         });
-        // 1) 누가 들어갈지는 공평하게: 오래 기다린 사람 → 오늘 적게 친 사람 순으로 정해요.
-        const priorityPool = players
-          .filter((p) => !occupied.has(p.id) && !restWish[p.id] && !excluded.includes(p.id))
-          .sort((a, b) => {
-            const wa = waitStart[a.id] || 0;
-            const wb = waitStart[b.id] || 0;
-            if (wa !== wb) return wa - wb;
-            return todayGamesPlayed(a.id) - todayGamesPlayed(b.id) || Math.random() - 0.5;
-          });
+        // 1) 누가 들어갈지: 방금 게임에 못 들어가고 밀린 사람은 반드시 포함, 나머지는 랜덤으로 채워요.
+        const priorityPool = players.filter((p) => !occupied.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
         const need = targets.length * 4;
-        const chosen = priorityPool.slice(0, need);
+        const chosen = pickFromPool(priorityPool, need);
         if (chosen.length < 4) return { ok: false, count: 0 };
 
         // 2) 코트에 나눠 넣을 땐, 같은 코트에서 방금 같이 끝난 사람들끼리 다시 뭉치지 않도록
@@ -1499,9 +1522,10 @@ function App() {
         });
         if (count === 0) return { ok: false, count: 0 };
         tx.set(REFS.courtmatches, { data: nextCourts });
-        return { ok: true, count };
+        return { ok: true, count, priorityPool, pickedIds: chosen.map((p) => p.id) };
       });
       if (result && result.ok) {
+        if (result.priorityPool) updateBenchedAfterPick(result.priorityPool, result.pickedIds);
         setBatchDoneMsg(`🔔 ${result.count}게임 매칭 완료! 각자 화면에서 배정된 코트를 확인해주세요.`);
         setTimeout(() => setBatchDoneMsg(""), 6000);
       }
@@ -1773,7 +1797,6 @@ function App() {
       ? { id: uid(), court: courtNum, teamA: m.next.teamA, teamB: m.next.teamB, scoreA: "", scoreB: "", done: false, date: todayStr() }
       : finished;
     persistCourtMatches(courtNum, nextCourtState);
-    markWaiting([...m.teamA, ...m.teamB].map((p) => p.id)); // 방금 끝난 사람들은 지금부터 대기 시작
     setFinishingCourt(null);
   }
 
@@ -2342,16 +2365,15 @@ function App() {
               <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">⏳ 대기 중 ({waitingPlayers.length}명)</p>
               <div className="space-y-1.5">
                 {waitingPlayers.map((p, i) => {
-                  const startedAt = waitStart[p.id];
-                  const mins = startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 60000)) : null;
+                  const isBenched = benched.includes(p.id);
                   return (
                     <div key={p.id} className="flex items-center justify-between bg-white rounded-xl px-3 py-2">
-                      <span className="text-sm font-medium text-stone-700">{i < 4 ? "🔜 " : ""}{p.name}</span>
+                      <span className="text-sm font-medium text-stone-700">{isBenched ? "🔜 " : ""}{p.name}</span>
                       <span
                         className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
-                        style={i < 4 ? { backgroundColor: "#E8F0FE", color: "var(--bc-blue)" } : { backgroundColor: "#F4F4F2", color: "#8A8A85" }}
+                        style={isBenched ? { backgroundColor: "#E8F0FE", color: "var(--bc-blue)" } : { backgroundColor: "#F4F4F2", color: "#8A8A85" }}
                       >
-                        대기 {mins != null ? `${mins}분` : "-"}
+                        {isBenched ? "다음 게임 확정" : "대기"}
                       </span>
                     </div>
                   );
@@ -2709,6 +2731,36 @@ function App() {
                     style={wantsRest ? { backgroundColor: "#F1F5F9", color: "#7C8494", borderColor: "#F1F5F9" } : {}}
                   >
                     {wantsRest && "⚪ "}{p.name} {wantsRest ? "· 쉼" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bc-card p-4">
+            <p className="text-xs font-semibold text-stone-500 mb-1">🚪 오늘 먼저 갈게요</p>
+            <p className="text-xs text-stone-400 mb-2">체크하면 매칭 대상에서 빠지고, "먼저 감" 표시가 떠요. 본인은 언제든, 관리자는 대신 눌러줄 수 있어요.</p>
+            {Object.keys(leftEarly).length > 0 && (
+              <p className="text-xs font-semibold mb-2" style={{ color: "#DC2626" }}>
+                🚪 먼저 간 사람: {players.filter((p) => leftEarly[p.id]).map((p) => p.name).join(", ") || "-"}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {players.map((p) => {
+                const left = !!leftEarly[p.id];
+                const isMe = p.id === myId;
+                const canToggle = isMe || adminOn;
+                return (
+                  <button
+                    key={p.id}
+                    disabled={!canToggle}
+                    onClick={() => toggleLeftEarly(p)}
+                    className={`px-3 py-1.5 rounded-full text-xs border transition ${
+                      left ? "" : "bg-stone-50 text-stone-500 border-stone-200"
+                    } ${!canToggle ? "opacity-40 cursor-not-allowed" : ""}`}
+                    style={left ? { backgroundColor: "#FEE2E2", color: "#DC2626", borderColor: "#FEE2E2" } : {}}
+                  >
+                    {left && "🚪 "}{p.name} {left ? "· 먼저 감" : ""}
                   </button>
                 );
               })}
@@ -3271,6 +3323,29 @@ function App() {
             );
           })()}
         </section>
+      )}
+
+      {showVoteQr && (
+        <div className="fixed inset-0 z-[96] bg-black/50 flex items-center justify-center px-6" onClick={() => setShowVoteQr(null)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center" onClick={(e) => e.stopPropagation()}>
+            <p className="text-2xl mb-2">🏆</p>
+            <p className="text-sm font-bold text-stone-800 mb-1">
+              {showVoteQr.reason === "left" ? `${showVoteQr.name}님, 가시기 전에 투표하고 가세요!` : "오늘 모임 수고하셨어요! 투표하고 마무리해요"}
+            </p>
+            <p className="text-xs text-stone-400 mb-4">QR을 찍으면 휴대폰에서 바로 MVP·친절왕 등을 투표할 수 있어요.</p>
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(window.location.origin + "/vote.html")}`}
+              alt="투표 QR 코드"
+              className="mx-auto rounded-xl border mb-3"
+              style={{ borderColor: "var(--bc-line)" }}
+              width={200}
+              height={200}
+            />
+            <button onClick={() => setShowVoteQr(null)} className="bc-btn-lg w-full text-sm font-bold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
+              닫기
+            </button>
+          </div>
+        </div>
       )}
 
       <BottomNav active={tab === "players" ? "match" : tab} />

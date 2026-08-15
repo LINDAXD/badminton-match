@@ -88,6 +88,7 @@ window.REFS = {
   shuttlecock: db.collection(BC_COLLECTION).doc("shuttlecock"), // 날짜별 셔틀콕 제출 현황
   dailylogin: db.collection(BC_COLLECTION).doc("dailylogin"),   // 로그인 기준 "출석" 기록 (모임 "참석"과는 별개)
   teamqueue: db.collection(BC_COLLECTION).doc("teamqueue"),     // 팀 대기열 (다음/그다음 경기를 미리 짜둔 목록)
+  leftearly: db.collection(BC_COLLECTION).doc("leftearly"),     // 오늘 먼저 간 사람 (매칭 대상에서 제외)
 };
 
 // ---- 공통 상수 ----
