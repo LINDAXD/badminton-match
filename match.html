@@ -2718,8 +2718,7 @@ function App() {
             <div className="flex flex-wrap gap-2">
               {players.map((p) => {
                 const wantsRest = !!restWish[p.id];
-                const isMe = p.id === myId;
-                const canToggle = isMe || adminOn;
+                const canToggle = true; // 공용 태블릿이라 "본인 확인"이 의미 없어서, 매칭에 들어가 있어도 누구나 눌러줄 수 있게 해요
                 return (
                   <button
                     key={p.id}
@@ -2748,8 +2747,7 @@ function App() {
             <div className="flex flex-wrap gap-2">
               {players.map((p) => {
                 const left = !!leftEarly[p.id];
-                const isMe = p.id === myId;
-                const canToggle = isMe || adminOn;
+                const canToggle = true; // 공용 태블릿이라 "본인 확인"이 의미 없어서, 매칭에 들어가 있어도 누구나 눌러줄 수 있게 해요
                 return (
                   <button
                     key={p.id}
