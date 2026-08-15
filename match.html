@@ -1207,6 +1207,11 @@ function App() {
     }
     return a;
   }
+  // 매칭 4명 중 1명을 "기록 담당"으로 무작위 지정 — 경기 끝나면 운영자가 일일이 안 물어봐도 그 사람이 와서 점수를 넣어요
+  function pickCaptain(teamA, teamB) {
+    const four = [...teamA, ...teamB];
+    return four[Math.floor(Math.random() * four.length)].id;
+  }
   function pickFromPool(pool, need) {
     const guaranteed = shuffleArr(pool.filter((p) => benched.includes(p.id)));
     const rest = shuffleArr(pool.filter((p) => !benched.includes(p.id)));
@@ -1227,14 +1232,14 @@ function App() {
         const onTeamA = m.teamA.some((x) => x.id === myId);
         const teammate = (onTeamA ? m.teamA : m.teamB).find((p) => p.id !== myId);
         const opponents = (onTeamA ? m.teamB : m.teamA).map((p) => p.name);
-        return { type: "playing", court: courtNum, teammate: teammate ? teammate.name : "", opponents };
+        return { type: "playing", court: courtNum, teammate: teammate ? teammate.name : "", opponents, isCaptain: m.captainId === myId };
       }
       if (m.next) {
         const inNext = [...m.next.teamA, ...m.next.teamB].some((p) => p.id === myId);
         if (inNext) {
           const nextTeammate = [...m.next.teamA, ...m.next.teamB].find((p) => p.id !== myId && (m.next.teamA.some((x) => x.id === myId) ? m.next.teamA.some((x) => x.id === p.id) : m.next.teamB.some((x) => x.id === p.id)));
           const nextOpponents = (m.next.teamA.some((x) => x.id === myId) ? m.next.teamB : m.next.teamA).map((p) => p.name);
-          return { type: "queued", court: courtNum, teammate: nextTeammate ? nextTeammate.name : "", opponents: nextOpponents };
+          return { type: "queued", court: courtNum, teammate: nextTeammate ? nextTeammate.name : "", opponents: nextOpponents, isCaptain: m.next.captainId === myId };
         }
       }
     }
@@ -1340,7 +1345,7 @@ function App() {
         // 팀을 나눌 때는 최근 파트너/상대 겹침을 피하는 쪽으로 똑똑하게 골라요.
         const four = pickFromPool(pool, 4);
         const { a, b } = splitScore(four, matchCtx);
-        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
         const next = { ...current, [courtNum]: match };
         tx.set(REFS.courtmatches, { data: next });
         return { ok: true, pool, pickedIds: four.map((p) => p.id) };
@@ -1406,7 +1411,7 @@ function App() {
         }
         const four = pickFromPool(pool, 4);
         const { a, b } = splitScore(four, matchCtx);
-        const queued = { teamA: a, teamB: b };
+        const queued = { teamA: a, teamB: b, captainId: pickCaptain(a, b) };
         const nextData = { ...current, [courtNum]: { ...existing, next: queued } };
         tx.set(REFS.courtmatches, { data: nextData });
         return { ok: true, freshWaitingPool, pickedIds: four.map((p) => p.id) };
@@ -1517,7 +1522,7 @@ function App() {
           const four = groups[i];
           if (four.length < 4) return;
           const { a, b } = splitScore(four, matchCtx);
-          nextCourts[courtNum] = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+          nextCourts[courtNum] = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
           count++;
         });
         if (count === 0) return { ok: false, count: 0 };
@@ -1555,7 +1560,7 @@ function App() {
     }
     const four = pickFourForCourt();
     const { a, b } = splitScore(four, matchCtx);
-    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
     persistCourtMatches(courtNum, match);
     if (matchMode === "skill") persistMatchSettings({ skillRankOffset: skillRankOffset + 1 });
     setMatchSeq((n) => n + 1);
@@ -1606,7 +1611,7 @@ function App() {
     } else {
       ({ a, b } = splitScore(four, matchCtx));
     }
-    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr() };
+    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
     persistCourtMatches(courtNum, match);
     setMatchSeq((n) => n + 1);
     setManualCourt(null);
@@ -1794,7 +1799,7 @@ function App() {
 
     // 미리 정해둔 "다음 경기"가 있으면, 끝나자마자 바로 그 매칭으로 시작해요. 없으면 예전처럼 빈 코트로 남아요.
     const nextCourtState = m.next
-      ? { id: uid(), court: courtNum, teamA: m.next.teamA, teamB: m.next.teamB, scoreA: "", scoreB: "", done: false, date: todayStr() }
+      ? { id: uid(), court: courtNum, teamA: m.next.teamA, teamB: m.next.teamB, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: m.next.captainId || pickCaptain(m.next.teamA, m.next.teamB) }
       : finished;
     persistCourtMatches(courtNum, nextCourtState);
     setFinishingCourt(null);
@@ -2248,6 +2253,11 @@ function App() {
                     <p className="text-center text-sm font-bold mt-3 text-stone-700">
                       {myStatus.type === "playing" ? `${myStatus.court}코트로 이동해주세요!` : `곧 ${myStatus.court}코트로 이동해주세요!`}
                     </p>
+                    {myStatus.isCaptain && (
+                      <p className="text-center text-xs font-bold mt-2 rounded-xl py-2" style={{ backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-navy)" }}>
+                        🖊️ 이번 경기 점수 기록 담당이에요! 끝나면 결과를 입력해주세요.
+                      </p>
+                    )}
                     <a
                       href="#court-list"
                       className="bc-btn-lg mt-2 w-full text-sm border"
@@ -2476,13 +2486,13 @@ function App() {
                     <div className="grid grid-cols-2 gap-2 px-4 py-4">
                       <div className={`bc-team-a rounded-xl p-3 ${aWinDone ? "ring-2 ring-offset-1" : ""}`} style={aWinDone ? { "--tw-ring-color": "var(--bc-blue)" } : {}}>
                         <p className="bc-team-label-a text-[10px] font-bold tracking-widest mb-2 flex items-center gap-1">🔵 A팀 {aWinDone && <span>🏆</span>}</p>
-                        <p className="text-sm font-semibold leading-tight truncate mb-1">{m.teamA[0].name}</p>
-                        <p className="text-sm font-semibold leading-tight truncate">{m.teamA[1].name}</p>
+                        <p className="text-sm font-semibold leading-tight truncate mb-1">{m.teamA[0].name}{m.captainId === m.teamA[0].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
+                        <p className="text-sm font-semibold leading-tight truncate">{m.teamA[1].name}{m.captainId === m.teamA[1].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
                       </div>
                       <div className={`bc-team-b rounded-xl p-3 ${bWinDone ? "ring-2 ring-offset-1" : ""}`} style={bWinDone ? { "--tw-ring-color": "var(--bc-orange)" } : {}}>
                         <p className="bc-team-label-b text-[10px] font-bold tracking-widest mb-2 flex items-center gap-1">🟠 B팀 {bWinDone && <span>🏆</span>}</p>
-                        <p className="text-sm font-semibold leading-tight truncate mb-1">{m.teamB[0].name}</p>
-                        <p className="text-sm font-semibold leading-tight truncate">{m.teamB[1].name}</p>
+                        <p className="text-sm font-semibold leading-tight truncate mb-1">{m.teamB[0].name}{m.captainId === m.teamB[0].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
+                        <p className="text-sm font-semibold leading-tight truncate">{m.teamB[1].name}{m.captainId === m.teamB[1].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
                       </div>
                     </div>
                     <p className="text-center text-[10px] text-stone-400 -mt-2 mb-1">VS</p>
