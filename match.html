@@ -1356,9 +1356,11 @@ function App() {
     return !m || m.done || m.date !== todayStr();
   });
 
-  // 참석 인원에 맞춰 코트 수를 자동으로 맞춰요 (9명→2코트, 13명→3코트 …). 관리자가 켜져있을 때만, 값이 실제로 다를 때만 저장해요.
+  const numCourtsManualRef = useRef(false); // 관리자가 +/- 로 직접 코트 수를 바꾸면, 인원 변동에 따른 자동 조정을 멈춰요
+
+  // 참석 인원에 맞춰 코트 수를 자동으로 맞춰요 (9명→2코트, 13명→3코트 …). 관리자가 직접 바꾼 적 없을 때만 작동해요.
   useEffect(() => {
-    if (!adminOn || meetingEndedToday) return;
+    if (!adminOn || meetingEndedToday || numCourtsManualRef.current) return;
     const recommended = Math.max(1, Math.floor(players.length / 4));
     if (recommended !== numCourts) persistMatchSettings({ numCourts: recommended });
   }, [players.length, adminOn, meetingEndedToday]);
@@ -1911,14 +1913,14 @@ function App() {
               <p className="text-sm font-semibold mb-2">사용할 코트 수</p>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => persistMatchSettings({ numCourts: Math.max(1, numCourts - 1) })}
+                  onClick={() => { numCourtsManualRef.current = true; persistMatchSettings({ numCourts: Math.max(1, numCourts - 1) }); }}
                   className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center"
                 >
                   −
                 </button>
                 <span className="scorefont text-xl w-8 text-center">{numCourts}</span>
                 <button
-                  onClick={() => persistMatchSettings({ numCourts: numCourts + 1 })}
+                  onClick={() => { numCourtsManualRef.current = true; persistMatchSettings({ numCourts: numCourts + 1 }); }}
                   className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center"
                 >
                   +
