@@ -1001,12 +1001,52 @@ function App() {
     }
   }
 
+  // 지금 코트에서 뛰고 있는 사람을 "쉴래요"/"먼저 갈게요"로 체크하면, 다음 게임이 아니라
+  // 지금 이 순간 바로 그 코트에서 빼고 대기 중인 다른 사람으로 교체해요 (교체할 사람이 없으면 그냥 알려줘요).
+  async function pullFromLiveMatchIfPlaying(memberId, memberName) {
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const entry = Object.entries(current).find(
+          ([, m]) => m && !m.done && m.date === todayStr() && [...m.teamA, ...m.teamB].some((p) => p.id === memberId)
+        );
+        if (!entry) return { ok: true, pulled: false };
+        const [courtNum, m] = entry;
+        const occupied = new Set();
+        Object.values(current).forEach((cm) => {
+          if (cm && !cm.done && cm.date === todayStr()) [...cm.teamA, ...cm.teamB].forEach((p) => occupied.add(p.id));
+        });
+        const candidate = players.find(
+          (p) => !occupied.has(p.id) && p.id !== memberId && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id)
+        );
+        if (!candidate) return { ok: false, courtNum };
+        const swap = (team) => team.map((p) => (p.id === memberId ? { id: candidate.id, name: candidate.name } : p));
+        const nextMatch = { ...m, teamA: swap(m.teamA), teamB: swap(m.teamB) };
+        tx.set(REFS.courtmatches, { data: { ...current, [courtNum]: nextMatch } });
+        return { ok: true, pulled: true, courtNum, candidateName: candidate.name };
+      }).then((result) => {
+        if (result && result.pulled) {
+          appAlert(`✅ ${memberName}님을 ${result.courtNum}코트에서 바로 빼고, ${result.candidateName}님으로 교체했어요.`);
+        } else if (result && result.ok === false) {
+          appAlert(`⚠️ ${memberName}님이 지금 ${result.courtNum}코트에서 뛰고 있는데, 교체할 대기 인원이 없어서 못 뺐어요. 대기자가 생기면 "팀 다시 섞기"로 빼주세요.`);
+        }
+      });
+    } catch (e) {}
+  }
+
   function toggleRestWish(memberId) {
+    const already = !!restWish[memberId];
     const next = { ...restWish };
-    if (next[memberId]) delete next[memberId];
+    if (already) delete next[memberId];
     else next[memberId] = true;
     setRestWish(next);
     RESTWISH_REF.set({ data: next }).catch(() => {});
+    if (!already) {
+      const p = players.find((x) => x.id === memberId);
+      pullFromLiveMatchIfPlaying(memberId, p ? p.name : "그 회원");
+    }
   }
 
   // 오늘 먼저 가는 사람 — 매칭 대상에서 빠지고, 가기 전에 투표 QR을 보여줘요
@@ -1017,6 +1057,7 @@ function App() {
     } else {
       next[member.id] = true;
       setShowVoteQr({ reason: "left", name: member.name });
+      pullFromLiveMatchIfPlaying(member.id, member.name);
     }
     setLeftEarly(next);
     REFS.leftearly.set({ data: next }).catch(() => {});
