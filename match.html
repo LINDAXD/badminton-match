@@ -1441,6 +1441,7 @@ function App() {
   const [showFullRecords, setShowFullRecords] = useState(false); // 기록 탭 - 전체 경기 기록 보기
   const [recordFilter, setRecordFilter] = useState("all"); // 전체 경기 기록 필터: all | win | loss
   const [resultsSearch, setResultsSearch] = useState(""); // 경기결과 탭 이름 검색
+  const [rankSearch, setRankSearch] = useState(""); // 랭킹 탭 - 내 순위 찾기 검색
   const [batchDoneMsg, setBatchDoneMsg] = useState("");
   async function startAllEmptyCourts() {
     if (!myId || batchStarting) return;
@@ -3171,6 +3172,48 @@ function App() {
                 <div className="text-center">
                   <p className="headfont text-xl text-stone-800">🏆 BIRDIE RANKING</p>
                   <p className="text-xs text-stone-400 mt-1">우리 모임 실력 랭킹</p>
+                </div>
+
+                {/* 🔎 내 순위 찾기 — 스크롤해서 찾지 않아도, 이름 검색하면 바로 결과가 떠요 */}
+                <div className="bc-card p-4">
+                  <input
+                    value={rankSearch}
+                    onChange={(e) => setRankSearch(e.target.value)}
+                    placeholder="🔎 내 이름 검색해서 순위 바로 보기"
+                    className="w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300"
+                  />
+                  {rankSearch.trim() && (() => {
+                    const q = rankSearch.trim().normalize("NFC");
+                    const foundRanked = ranked.find((p) => (p.name || "").normalize("NFC").includes(q));
+                    const foundUnranked = !foundRanked && unranked.find((p) => (p.name || "").normalize("NFC").includes(q));
+                    if (foundRanked) {
+                      const idx = ranked.findIndex((p) => p.id === foundRanked.id);
+                      const skillScoreVal = getSkillScore(foundRanked);
+                      const tier = tierForScore(skillScoreVal, foundRanked.stats.games);
+                      const tc = tierColor(tier);
+                      return (
+                        <div className="mt-3 rounded-xl p-4 flex items-center gap-3" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
+                          <p className="scorefont text-2xl font-extrabold shrink-0" style={{ color: "var(--bc-blue)" }}>{idx + 1}위</p>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-bold text-stone-800 truncate">{foundRanked.name}</p>
+                            <p className="text-xs text-stone-500 mt-0.5">
+                              <span className="font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: tc.bg, color: tc.fg }}>{tier}급</span>
+                              {" "}{Math.round(skillScoreVal)}점 · {foundRanked.stats.games}경기
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (foundUnranked) {
+                      return (
+                        <div className="mt-3 rounded-xl p-4" style={{ backgroundColor: "#FEF3C7" }}>
+                          <p className="text-sm font-bold text-stone-800">{foundUnranked.name}님은 아직 평가중이에요</p>
+                          <p className="text-xs mt-1" style={{ color: "#B45309" }}>{foundUnranked.stats.games}/{RANKING_MIN_GAMES}경기 · 10경기를 채우면 정식 순위가 매겨져요</p>
+                        </div>
+                      );
+                    }
+                    return <p className="text-xs text-stone-400 mt-3 text-center">일치하는 이름이 없어요.</p>;
+                  })()}
                 </div>
 
                 <div className="flex gap-1.5 overflow-x-auto">
