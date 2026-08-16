@@ -8,6 +8,16 @@ body {
   overflow-wrap: break-word;
 }
 
+/* 태블릿(예: 갤럭시탭 S7+ 12.4인치, 16:10)처럼 화면 폭이 넓은 공용 기기에서는
+   폰 기준 글씨가 상대적으로 작아 보여서, 전체 글자/여백을 한 번에 키워요.
+   Tailwind 글자 크기(text-sm 등)가 rem 기반이라, 기준 폰트만 키우면 앱 전체에 자동 반영돼요. */
+@media (min-width: 900px) {
+  html { font-size: 19px; }
+}
+@media (min-width: 1300px) {
+  html { font-size: 21px; }
+}
+
 .headfont {
   font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
   letter-spacing: -0.01em;
