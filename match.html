@@ -513,6 +513,7 @@ function App() {
   const [copyMsg, setCopyMsg] = useState("");
   const backupInputRef = useRef(null);
   const [numCourts, setNumCourts] = useState(2);
+  const [numCourtsManual, setNumCourtsManual] = useState(false); // 관리자가 +/- 로 직접 바꾼 적 있으면, 인원 변동에 따른 자동 조정을 멈춰요
   const [meetingEndedDate, setMeetingEndedDate] = useState(null);
   const [autoStart, setAutoStart] = useState(true);
 
@@ -645,6 +646,7 @@ function App() {
       setLockedCourts((data && data.lockedCourts) || []);
       setSkillRankOffset((data && data.skillRankOffset) || 0);
       if (data && data.numCourts) setNumCourts(data.numCourts);
+      setNumCourtsManual(!!(data && data.numCourtsManual));
       setMeetingEndedDate((data && data.meetingEndedDate) || null);
       setAutoStart(data && data.autoStart !== undefined ? data.autoStart : true);
     }, () => {});
@@ -683,6 +685,7 @@ function App() {
       lockedCourts: patch.lockedCourts !== undefined ? patch.lockedCourts : lockedCourts,
       skillRankOffset: patch.skillRankOffset !== undefined ? patch.skillRankOffset : skillRankOffset,
       numCourts: patch.numCourts !== undefined ? patch.numCourts : numCourts,
+      numCourtsManual: patch.numCourtsManual !== undefined ? patch.numCourtsManual : numCourtsManual,
       meetingEndedDate: patch.meetingEndedDate !== undefined ? patch.meetingEndedDate : meetingEndedDate,
       autoStart: patch.autoStart !== undefined ? patch.autoStart : autoStart,
     };
@@ -692,6 +695,7 @@ function App() {
     setLockedCourts(next.lockedCourts);
     setSkillRankOffset(next.skillRankOffset);
     setNumCourts(next.numCourts);
+    setNumCourtsManual(next.numCourtsManual);
     setMeetingEndedDate(next.meetingEndedDate);
     setAutoStart(next.autoStart);
     REFS.matchmode.set(next).catch(() => {});
@@ -1356,14 +1360,12 @@ function App() {
     return !m || m.done || m.date !== todayStr();
   });
 
-  const numCourtsManualRef = useRef(false); // 관리자가 +/- 로 직접 코트 수를 바꾸면, 인원 변동에 따른 자동 조정을 멈춰요
-
   // 참석 인원에 맞춰 코트 수를 자동으로 맞춰요 (9명→2코트, 13명→3코트 …). 관리자가 직접 바꾼 적 없을 때만 작동해요.
   useEffect(() => {
-    if (!adminOn || meetingEndedToday || numCourtsManualRef.current) return;
+    if (!adminOn || meetingEndedToday || numCourtsManual) return;
     const recommended = Math.max(1, Math.floor(players.length / 4));
     if (recommended !== numCourts) persistMatchSettings({ numCourts: recommended });
-  }, [players.length, adminOn, meetingEndedToday]);
+  }, [players.length, adminOn, meetingEndedToday, numCourtsManual]);
 
   const autoStartInFlight = useRef(false);
   useEffect(() => {
@@ -1932,20 +1934,29 @@ function App() {
               <p className="text-sm font-semibold mb-2">사용할 코트 수</p>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => { numCourtsManualRef.current = true; persistMatchSettings({ numCourts: Math.max(1, numCourts - 1) }); }}
+                  onClick={() => persistMatchSettings({ numCourts: Math.max(1, numCourts - 1), numCourtsManual: true })}
                   className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center"
                 >
                   −
                 </button>
                 <span className="scorefont text-xl w-8 text-center">{numCourts}</span>
                 <button
-                  onClick={() => { numCourtsManualRef.current = true; persistMatchSettings({ numCourts: numCourts + 1 }); }}
+                  onClick={() => persistMatchSettings({ numCourts: numCourts + 1, numCourtsManual: true })}
                   className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center"
                 >
                   +
                 </button>
                 <span className="text-xs text-stone-400">(최대 {maxCourts || 0}면 · 4명당 1코트)</span>
               </div>
+              {numCourtsManual && (
+                <button
+                  onClick={() => persistMatchSettings({ numCourtsManual: false })}
+                  className="text-[11px] mt-1.5 underline underline-offset-2"
+                  style={{ color: "var(--bc-sub)" }}
+                >
+                  인원수에 맞춰 자동으로 다시 맞추기
+                </button>
+              )}
               <div className="flex items-center justify-between mt-3 pt-3 border-t border-stone-100">
                 <div>
                   <p className="text-xs font-semibold text-stone-700">🤖 자동 매칭 시작</p>
