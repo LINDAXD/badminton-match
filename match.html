@@ -719,8 +719,13 @@ function App() {
 
 
   function toggleExcluded(id) {
-    const next = excluded.includes(id) ? excluded.filter((x) => x !== id) : [...excluded, id];
+    const wasExcluded = excluded.includes(id);
+    const next = wasExcluded ? excluded.filter((x) => x !== id) : [...excluded, id];
     persistMatchSettings({ excluded: next });
+    if (!wasExcluded) {
+      const p = players.find((x) => x.id === id);
+      pullFromLiveMatchIfPlaying(id, p ? p.name : "그 회원");
+    }
   }
 
   function toggleCourtLock(courtNum) {
@@ -2414,7 +2419,14 @@ function App() {
             <p className="text-xs uppercase tracking-widest text-stone-400">🏟️ 전체 코트 현황 ({numCourts}면)</p>
           </div>
 
-          {Array.from({ length: numCourts }, (_, i) => i + 1).map((courtNum) => {
+          {(() => {
+            // 코트 수를 줄여도, 이미 경기 중인 코트는 끝날 때까지 화면에서 안 사라지게 해요
+            // (숨겨버리면 그 코트 사람들이 계속 "경기 중"으로 붙잡혀서 다른 매칭에도 못 들어가요).
+            const activeExtra = Object.entries(courtMatches)
+              .filter(([cn, m]) => Number(cn) > numCourts && m && !m.done && m.date === todayStr())
+              .map(([cn]) => Number(cn));
+            const courtNumsToShow = [...Array.from({ length: numCourts }, (_, i) => i + 1), ...activeExtra].sort((a, b) => a - b);
+            return courtNumsToShow.map((courtNum) => {
             const raw = courtMatches[courtNum];
             const m = raw && raw.date === todayStr() ? raw : null; // 오늘 날짜가 아닌(예전) 경기는 화면상 비어있는 코트로 취급해요
             const isManualHere = manualCourt === courtNum;
@@ -2696,7 +2708,8 @@ function App() {
                 )}
               </div>
             );
-          })}
+          });
+          })()}
 
           <div className="bc-card p-4">
             <p className="text-xs font-semibold text-stone-500 mb-1">다음 경기는 쉴래요</p>
