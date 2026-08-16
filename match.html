@@ -1556,12 +1556,24 @@ function App() {
     if (!adminOn) { tryAdminUnlock(); return; }
     const m = courtMatches[courtNum];
     if (!m) return;
-    const four = [...m.teamA, ...m.teamB];
+    const current4 = [...m.teamA, ...m.teamB];
+    // 그 사이 "쉴래요"/"먼저 갈게요"를 누른 사람이 있으면 빼고, 대기 중인 사람으로 채워요.
+    const staying = current4.filter((p) => !restWish[p.id] && !leftEarly[p.id]);
+    const leaving = current4.filter((p) => restWish[p.id] || leftEarly[p.id]);
+    let four = current4;
+    if (leaving.length > 0) {
+      const candidates = shuffleArr(waitingPlayers.filter((p) => !current4.some((x) => x.id === p.id)));
+      if (candidates.length < leaving.length) {
+        appAlert(`쉬거나 먼저 가는 사람이 있어서 대기 인원이 부족해요. (${leaving.length - candidates.length}명 더 필요해요)`);
+        return;
+      }
+      four = [...staying, ...candidates.slice(0, leaving.length)];
+    }
     // 지금이랑 완전히 똑같은 조합이 나오면 "안 바뀐 것처럼" 보이니까, 지금 조합은 후보에서 빼고
     // 남은 조합들 중에서 골라요 — 그래도 다 똑같으면(사실상 조합이 하나뿐일 때) 무작위로라도 하나 골라요.
     const currentKey = `${four[0].id}|${four[1].id}`;
     const { a, b } = splitScore(four, matchCtx, currentKey);
-    const match = { ...m, teamA: a, teamB: b, scoreA: "", scoreB: "", winnerOverride: null };
+    const match = { ...m, teamA: a, teamB: b, scoreA: "", scoreB: "", winnerOverride: null, captainId: pickCaptain(a, b) };
     persistCourtMatches(courtNum, match);
   }
 
@@ -1578,10 +1590,17 @@ function App() {
         const current = data.data || {};
         const activeCourts = Object.entries(current).filter(([, m]) => m && !m.done && m.date === todayStr());
         if (activeCourts.length < 2) return; // 코트 1개뿐이면 "전체" 섞기 의미가 없어요
-        const allPlayers = shuffleArr(activeCourts.flatMap(([, m]) => [...m.teamA, ...m.teamB]));
+        const currentPlayers = activeCourts.flatMap(([, m]) => [...m.teamA, ...m.teamB]);
+        // 쉴래요/먼저 갈게요 누른 사람은 빼고, 대기 중인 사람으로 채워요.
+        const staying = currentPlayers.filter((p) => !restWish[p.id] && !leftEarly[p.id]);
+        const leavingCount = currentPlayers.length - staying.length;
+        const waitingFresh = players.filter((p) => !currentPlayers.some((x) => x.id === p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
+        const fillIn = shuffleArr(waitingFresh).slice(0, leavingCount);
+        const allPlayers = shuffleArr([...staying, ...fillIn]);
         const nextCourts = { ...current };
         activeCourts.forEach(([courtNum], i) => {
           const four = allPlayers.slice(i * 4, i * 4 + 4);
+          if (four.length < 4) return; // 사람이 부족하면 그 코트는 그대로 둬요
           const { a, b } = splitScore(four, matchCtx);
           nextCourts[courtNum] = { ...current[courtNum], teamA: a, teamB: b, scoreA: "", scoreB: "", winnerOverride: null, captainId: pickCaptain(a, b) };
         });
