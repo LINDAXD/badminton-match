@@ -582,30 +582,6 @@ function App() {
         </div>
       </section>
 
-      {/* 바로가기 2x2 */}
-      <section className="px-5 max-w-2xl mx-auto mb-5 grid grid-cols-2 gap-3">
-        <a href="./match.html?tab=match" className="tap-scale bc-card p-4">
-          <p className="text-2xl mb-1">🏸</p>
-          <p className="text-sm font-bold text-stone-800">매칭</p>
-          <p className="text-[11px] text-stone-400 mt-0.5">오늘 경기 확인</p>
-        </a>
-        <a href="./match.html?tab=ranking" className="tap-scale bc-card p-4">
-          <p className="text-2xl mb-1">🏆</p>
-          <p className="text-sm font-bold text-stone-800">랭킹</p>
-          <p className="text-[11px] text-stone-400 mt-0.5">전체 랭킹 보기</p>
-        </a>
-        <a href="./match.html?tab=record" className="tap-scale bc-card p-4">
-          <p className="text-2xl mb-1">📊</p>
-          <p className="text-sm font-bold text-stone-800">기록</p>
-          <p className="text-[11px] text-stone-400 mt-0.5">경기 기록 보기</p>
-        </a>
-        <a href="./members.html" className="tap-scale bc-card p-4">
-          <p className="text-2xl mb-1">👥</p>
-          <p className="text-sm font-bold text-stone-800">멤버</p>
-          <p className="text-[11px] text-stone-400 mt-0.5">회원/점수 확인</p>
-        </a>
-      </section>
-
       {/* 🏸 오늘 경기 — 지금 어느 코트에서 뭐가 진행 중인지 홈에서 바로 확인 */}
       {Object.keys(courtMatches).length > 0 && (
         <section className="px-5 max-w-2xl mx-auto mb-4">

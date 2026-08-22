@@ -80,6 +80,17 @@ function App() {
     }
   }, [myId, roster]);
 
+  // 랭킹 탭 검색 결과 등, 다른 화면에서 특정 회원 프로필로 바로 넘어올 때 써요 (?view=회원ID).
+  React.useEffect(() => {
+    if (!roster.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const viewId = params.get("view");
+    if (viewId) {
+      const target = roster.find((r) => r.id === viewId);
+      if (target) setProfileMember(target);
+    }
+  }, [roster]);
+
   React.useEffect(() => {
     const unsub = REFS.checkinlog.onSnapshot((snap) => {
       const data = snap.data();
