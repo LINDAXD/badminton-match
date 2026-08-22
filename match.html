@@ -526,6 +526,8 @@ function App() {
   const [meetingEndedDate, setMeetingEndedDate] = useState(null);
   // 기본값은 꺼짐이에요 — 처음 체크인했을 때 다들 "대기 중"으로만 보이고, 매칭은 관리자/회원이 직접 눌러야 시작돼요.
   const [autoStart, setAutoStart] = useState(false);
+  // 점수 입력 후 자동 종료되기까지 기다리는 시간(초) — 관리자가 조절 가능, 기본 6초
+  const [autoFinishDelaySec, setAutoFinishDelaySec] = useState(6);
 
   // 오늘 운영 카드에서 셔틀콕 제출 현황도 같이 보여주려고, 여기서도 살짝 구독해요 (셔틀콕 패널이랑 매칭 화면이 따로 놀지 않게).
   const [shuttlecockToday, setShuttlecockToday] = useState({ submitted: {}, exempt: {} });
@@ -659,6 +661,7 @@ function App() {
       setNumCourtsManual(!!(data && data.numCourtsManual));
       setMeetingEndedDate((data && data.meetingEndedDate) || null);
       setAutoStart(data && data.autoStart !== undefined ? data.autoStart : false);
+      setAutoFinishDelaySec(data && data.autoFinishDelaySec !== undefined ? data.autoFinishDelaySec : 6);
     }, () => {});
 
     const unsub9 = REFS.kindvotes.onSnapshot((snap) => {
@@ -698,6 +701,7 @@ function App() {
       numCourtsManual: patch.numCourtsManual !== undefined ? patch.numCourtsManual : numCourtsManual,
       meetingEndedDate: patch.meetingEndedDate !== undefined ? patch.meetingEndedDate : meetingEndedDate,
       autoStart: patch.autoStart !== undefined ? patch.autoStart : autoStart,
+      autoFinishDelaySec: patch.autoFinishDelaySec !== undefined ? patch.autoFinishDelaySec : autoFinishDelaySec,
     };
     setMatchMode(next.mode);
     setExcluded(next.excluded);
@@ -708,6 +712,7 @@ function App() {
     setNumCourtsManual(next.numCourtsManual);
     setMeetingEndedDate(next.meetingEndedDate);
     setAutoStart(next.autoStart);
+    setAutoFinishDelaySec(next.autoFinishDelaySec);
     REFS.matchmode.set(next).catch(() => {});
   }
 
@@ -1916,26 +1921,52 @@ function App() {
 
   // 점수만 입력해도 자동으로 끝나게 — "경기 종료"나 "승리" 버튼을 따로 안 눌러도 점수만으로 승부가 갈리면 자동 기록돼요.
   // 배드민턴 정식 규칙대로: 21점 이상 + 2점차 이상 나면 승부 확정, 24-24 같은 듀스 상황이면 30점 캡에서 강제 종료돼요.
-  // 타이핑 중간중간(예: "2" 찍고 "5" 마저 찍는 순간)에 바로 반응하면 아직 입력 중인데 끝나버릴 수 있어서,
-  // 마지막으로 점수가 바뀌고 나서 살짝(0.8초) 기다렸다가 그때도 승부가 갈려있으면 그제서야 종료해요.
+  // 오타로 잘못된 점수를 넣었을 때 바로 확정되면 곤란하니까, 승부가 갈리는 순간 바로 끝내지 않고
+  // 화면에 "곧 종료돼요" 안내 + 취소 버튼을 4초간 띄워요. 그 안에 점수를 고치거나 취소를 누르면 안 끝나요.
   const autoFinishTimersRef = useRef({});
+  const autoFinishCanceledKeyRef = useRef({}); // courtNum -> 취소를 누른 시점의 "scoreA|scoreB" (같은 점수로는 다시 안 뜨게)
+  const [pendingAutoFinish, setPendingAutoFinish] = useState({}); // courtNum -> true(카운트다운 중)
+
+  function cancelAutoFinish(courtNum) {
+    clearTimeout(autoFinishTimersRef.current[courtNum]);
+    const m = courtMatches[courtNum];
+    if (m) autoFinishCanceledKeyRef.current[courtNum] = `${m.scoreA}|${m.scoreB}`;
+    setPendingAutoFinish((p) => ({ ...p, [courtNum]: false }));
+  }
+
   useEffect(() => {
     Object.entries(courtMatches).forEach(([courtNum, m]) => {
-      if (!m || m.done || m.date !== todayStr()) return;
+      if (!m || m.done || m.date !== todayStr()) {
+        clearTimeout(autoFinishTimersRef.current[courtNum]);
+        return;
+      }
       const a = Number(m.scoreA), b = Number(m.scoreB);
-      if (m.scoreA === "" || m.scoreB === "" || isNaN(a) || isNaN(b) || a === b) return;
-      const decided = (Math.max(a, b) >= 21 && Math.abs(a - b) >= 2) || Math.max(a, b) >= 30;
-      if (!decided) return;
+      const key = `${m.scoreA}|${m.scoreB}`;
+      const decided =
+        m.scoreA !== "" && m.scoreB !== "" && !isNaN(a) && !isNaN(b) && a !== b &&
+        ((Math.max(a, b) >= 21 && Math.abs(a - b) >= 2) || Math.max(a, b) >= 30);
+      if (!decided) {
+        clearTimeout(autoFinishTimersRef.current[courtNum]);
+        setPendingAutoFinish((p) => (p[courtNum] ? { ...p, [courtNum]: false } : p));
+        return;
+      }
+      if (autoFinishCanceledKeyRef.current[courtNum] === key) return; // 방금 이 점수로 취소했으면 다시 카운트다운 시작 안 함
       clearTimeout(autoFinishTimersRef.current[courtNum]);
+      setPendingAutoFinish((p) => (p[courtNum] ? p : { ...p, [courtNum]: true }));
       autoFinishTimersRef.current[courtNum] = setTimeout(() => {
+        setPendingAutoFinish((p) => ({ ...p, [courtNum]: false }));
         const latest = courtMatches[courtNum];
         if (!latest || latest.done) return;
+        const latestKey = `${latest.scoreA}|${latest.scoreB}`;
+        if (autoFinishCanceledKeyRef.current[courtNum] === latestKey) return;
         const la = Number(latest.scoreA), lb = Number(latest.scoreB);
-        const stillDecided = !isNaN(la) && !isNaN(lb) && la !== lb && ((Math.max(la, lb) >= 21 && Math.abs(la - lb) >= 2) || Math.max(la, lb) >= 30);
+        const stillDecided =
+          latest.scoreA !== "" && latest.scoreB !== "" && !isNaN(la) && !isNaN(lb) && la !== lb &&
+          ((Math.max(la, lb) >= 21 && Math.abs(la - lb) >= 2) || Math.max(la, lb) >= 30);
         if (stillDecided && finishingCourt !== Number(courtNum)) finishMatch(Number(courtNum));
-      }, 800);
+      }, Math.max(1, autoFinishDelaySec) * 1000);
     });
-  }, [courtMatches]);
+  }, [courtMatches, autoFinishDelaySec]);
 
 
   return (
@@ -2149,6 +2180,27 @@ function App() {
                     style={{ left: autoStart ? "22px" : "2px" }}
                   />
                 </button>
+              </div>
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-stone-100">
+                <div>
+                  <p className="text-xs font-semibold text-stone-700">⏳ 점수 자동 종료 대기시간</p>
+                  <p className="text-[11px] text-stone-400">승부가 갈리는 점수를 입력하고 이 시간 동안 취소 안 하면 자동 기록돼요</p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => persistMatchSettings({ autoFinishDelaySec: Math.max(2, autoFinishDelaySec - 1) })}
+                    className="w-7 h-7 rounded-full border border-stone-200 text-stone-500 font-bold"
+                  >
+                    −
+                  </button>
+                  <span className="scorefont text-sm w-10 text-center">{autoFinishDelaySec}초</span>
+                  <button
+                    onClick={() => persistMatchSettings({ autoFinishDelaySec: Math.min(20, autoFinishDelaySec + 1) })}
+                    className="w-7 h-7 rounded-full border border-stone-200 text-stone-500 font-bold"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
@@ -2673,6 +2725,18 @@ function App() {
                         className="scorefont w-14 h-12 text-center text-xl rounded-xl border border-stone-300 bg-stone-50 disabled:bg-stone-100 disabled:text-stone-400"
                       />
                     </div>
+                    {pendingAutoFinish[courtNum] && (
+                      <div className="mx-4 mb-3 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2" style={{ backgroundColor: "#FFFBEA", border: "1px solid #FFD54F" }}>
+                        <p className="text-xs font-semibold" style={{ color: "#B98900" }}>⏳ {autoFinishDelaySec}초 뒤 점수대로 자동 종료돼요</p>
+                        <button
+                          onClick={() => cancelAutoFinish(courtNum)}
+                          className="text-xs font-bold px-3 py-1.5 rounded-full shrink-0"
+                          style={{ backgroundColor: "#B98900", color: "#fff" }}
+                        >
+                          잠깐, 아직이에요
+                        </button>
+                      </div>
+                    )}
                     {!m.done ? (
                       <div className="px-4 pb-4 space-y-2">
                         {/* 점수 입력이 귀찮으면, 승리팀만 골라도 경기를 끝낼 수 있어요 */}
