@@ -1261,10 +1261,17 @@ function App() {
     const four = [...teamA, ...teamB];
     return four[Math.floor(Math.random() * four.length)].id;
   }
+  // 방금 게임에 밀린 사람(benched)은 다음 매칭에서 최우선으로 넣어주되, 밀린 사람 수가 필요한 인원(need)보다
+  // 많거나 같으면 그 사람들로만 꽉 차버려서 방금 경기 끝난 사람들이랑 영영 안 섞이는 문제가 있었어요
+  // (인원이 딱 코트 수의 배수일 때 두 그룹이 계속 자리만 바꿔가며 서로 안 섞이는 현상). 그래서 밀린 사람은
+  // 최대 need의 절반까지만 확정으로 넣고, 나머지 자리는 남은 밀린 사람까지 합쳐서 무작위로 섞어요.
   function pickFromPool(pool, need) {
-    const guaranteed = shuffleArr(pool.filter((p) => benched.includes(p.id)));
-    const rest = shuffleArr(pool.filter((p) => !benched.includes(p.id)));
-    return [...guaranteed, ...rest].slice(0, need);
+    const benchedPool = shuffleArr(pool.filter((p) => benched.includes(p.id)));
+    const restPool = shuffleArr(pool.filter((p) => !benched.includes(p.id)));
+    const guaranteedCount = Math.min(benchedPool.length, Math.max(1, Math.ceil(need / 2)));
+    const guaranteed = benchedPool.slice(0, guaranteedCount);
+    const mixedRest = shuffleArr([...benchedPool.slice(guaranteedCount), ...restPool]);
+    return [...guaranteed, ...mixedRest].slice(0, need);
   }
   function updateBenchedAfterPick(pool, pickedIds) {
     const newBenched = pool.map((p) => p.id).filter((id) => !pickedIds.includes(id));
@@ -1295,7 +1302,7 @@ function App() {
   // (예: 이번엔 1-4위/5-8위, 다음엔 2-5위/6-9위 ... 이렇게 밀리다 보면 1위와 8위가 한 그룹이 될 수도 있는데,
   //  그때도 팀은 실력 차가 가장 적은 조합으로 갈라서 항상 공평하게 만들어요.)
   function pickFourForCourt() {
-    if (matchMode !== "skill") return waitingPlayers.slice(0, 4);
+    if (matchMode !== "skill") return pickFromPool(waitingPlayers, 4);
     const byRank = [...waitingPlayers].sort((a, b) => skillOf(b.id) - skillOf(a.id));
     const n = byRank.length;
     if (n < 4) return byRank;
