@@ -1397,7 +1397,6 @@ function App() {
 
   async function startRandomMatchAsMember(courtNum, opts) {
     const silent = opts && opts.silent;
-    if (!myId) { if (!silent) appAlert("먼저 홈에서 이름으로 입장해주세요."); return false; }
     if (meetingEndedToday) { if (!silent) appAlert("오늘 모임이 이미 종료됐어요."); return false; }
     if (lockedCourts.includes(courtNum)) { if (!silent) appAlert("이 코트는 잠겨있어요."); return false; }
     if (randomBusy) return false; // 중복 클릭 방지
@@ -1471,7 +1470,7 @@ function App() {
 
   const autoStartInFlight = useRef(false);
   useEffect(() => {
-    if (!autoStart || !myId || meetingEndedToday || autoStartInFlight.current) return;
+    if (!autoStart || meetingEndedToday || autoStartInFlight.current) return;
     if (waitingPlayers.length < 4) return;
     if (emptyCourtNums.length === 0) return;
     // 두세 코트가 한꺼번에 비어도 순서대로 다 채워요 — 인원이 되는 만큼 이어서 매칭해요.
@@ -1500,7 +1499,7 @@ function App() {
   const [rankSearch, setRankSearch] = useState(""); // 랭킹 탭 - 내 순위 찾기 검색
   const [batchDoneMsg, setBatchDoneMsg] = useState("");
   async function startAllEmptyCourts() {
-    if (!myId || batchStarting) return;
+    if (batchStarting) return;
     const targets = [...emptyCourtNums];
     if (targets.length === 0) return;
     setBatchStarting(true);
@@ -1915,15 +1914,26 @@ function App() {
     setFinishingCourt(null);
   }
 
-  // 점수만 입력해도 자동으로 끝나게 — 한쪽이 25점(또는 그 이상)에 도달하면 "경기 종료" 버튼을 따로 안 눌러도
-  // 그 순간 바로 점수가 큰 쪽 승리로 자동 기록돼요.
+  // 점수만 입력해도 자동으로 끝나게 — "경기 종료"나 "승리" 버튼을 따로 안 눌러도 점수만으로 승부가 갈리면 자동 기록돼요.
+  // 배드민턴 정식 규칙대로: 21점 이상 + 2점차 이상 나면 승부 확정, 24-24 같은 듀스 상황이면 30점 캡에서 강제 종료돼요.
+  // 타이핑 중간중간(예: "2" 찍고 "5" 마저 찍는 순간)에 바로 반응하면 아직 입력 중인데 끝나버릴 수 있어서,
+  // 마지막으로 점수가 바뀌고 나서 살짝(0.8초) 기다렸다가 그때도 승부가 갈려있으면 그제서야 종료해요.
+  const autoFinishTimersRef = useRef({});
   useEffect(() => {
     Object.entries(courtMatches).forEach(([courtNum, m]) => {
       if (!m || m.done || m.date !== todayStr()) return;
-      if (finishingCourt === Number(courtNum)) return;
       const a = Number(m.scoreA), b = Number(m.scoreB);
       if (m.scoreA === "" || m.scoreB === "" || isNaN(a) || isNaN(b) || a === b) return;
-      if (a >= 25 || b >= 25) finishMatch(Number(courtNum));
+      const decided = (Math.max(a, b) >= 21 && Math.abs(a - b) >= 2) || Math.max(a, b) >= 30;
+      if (!decided) return;
+      clearTimeout(autoFinishTimersRef.current[courtNum]);
+      autoFinishTimersRef.current[courtNum] = setTimeout(() => {
+        const latest = courtMatches[courtNum];
+        if (!latest || latest.done) return;
+        const la = Number(latest.scoreA), lb = Number(latest.scoreB);
+        const stillDecided = !isNaN(la) && !isNaN(lb) && la !== lb && ((Math.max(la, lb) >= 21 && Math.abs(la - lb) >= 2) || Math.max(la, lb) >= 30);
+        if (stillDecided && finishingCourt !== Number(courtNum)) finishMatch(Number(courtNum));
+      }, 800);
     });
   }, [courtMatches]);
 
