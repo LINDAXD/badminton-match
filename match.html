@@ -1204,6 +1204,10 @@ function App() {
 
   const [justShuffled, setJustShuffled] = useState(false);
 
+  // "오늘 먼저 갈게요"를 누른 사람은 오늘 참석 인원수에서 완전히 빠져야 해요 (집계용 목록은 그대로 players를 써서
+  // 관리자 명단/토글 등은 안 건드리고, "참석 N명" 표시에만 이 목록을 써요).
+  const activePlayers = players.filter((p) => !leftEarly[p.id]);
+
   // 현재 활성 매칭에 배정된(=아직 안 끝난) 선수 id 집합
   const occupiedIds = new Set();
   Object.values(courtMatches).forEach((m) => {
@@ -1215,6 +1219,8 @@ function App() {
   });
 
   // 대기 중(체크인 했지만 지금 안 뛰고 있는) 선수들 — 방금 밀려서 확정된 사람(benched) 먼저, 나머지는 이름순
+  // ⚠️ 이 목록은 "다음 매칭에 실제로 뽑힐 수 있는 후보"예요. 쉬고 싶다는 사람(restWish)/먼저 간 사람(leftEarly)은
+  // 절대 여기 포함되면 안 돼요 — 매칭 함수들이 전부 이 목록을 그대로 써서 코트를 채우기 때문이에요.
   const waitingPlayers = players
     .filter((p) => !occupiedIds.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id))
     .sort((a, b) => {
@@ -1223,6 +1229,14 @@ function App() {
       if (ba !== bb) return ba - bb;
       return a.name.localeCompare(b.name, "ko");
     });
+
+  // 화면 상단 요약("N명 참석 · N명 경기 중 · N명 대기")에 쓰는 숫자예요.
+  // 쉬고 싶어요(restWish)를 누른 사람은 실제 매칭 후보(waitingPlayers)에서는 빠지지만,
+  // 그렇다고 완전히 사라지면 참석 인원이랑 숫자가 안 맞아 보이니, 여기서는 "대기 중"으로 계속 세어줘요.
+  // (먼저 간 사람/매칭 제외된 사람은 여기서도 제외 — 진짜로 오늘 안 뛰니까요.)
+  const displayWaitingCount = players.filter(
+    (p) => !occupiedIds.has(p.id) && !leftEarly[p.id] && !excluded.includes(p.id)
+  ).length;
 
   // "직접 4명 선택"할 때는 "쉬고 싶어요"/제외 표시와 상관없이, 지금 다른 경기 중이 아닌
   // 오늘 참석한 사람 전체 중에서 고를 수 있어요 (친구끼리 같이 넣고 싶을 때 등, 자동 매칭 후보가 아니어도 직접은 골라줄 수 있게).
@@ -1299,17 +1313,42 @@ function App() {
   const [expandedTools, setExpandedTools] = useState({}); // 코트별로 "더보기" 도구 모음이 펼쳐져 있는지
 
   // 진행 중인 경기에서 특정 선수 한 명만 다른 사람으로 바꿔요 (점수는 그대로 유지) — 잘못 배정됐을 때 고치는 용도예요.
-  function swapPlayerInMatch(courtNum, oldPlayerId, newPlayerId) {
+  // 진행 중인 경기에서 특정 선수 한 명만 다른 사람으로 바꿔요 (점수는 그대로 유지) — 잘못 배정됐을 때 고치는 용도예요.
+  async function swapPlayerInMatch(courtNum, oldPlayerId, newPlayerId) {
     if (!adminOn) return;
-    const m = courtMatches[courtNum];
-    if (!m) return;
     const newPlayer = players.find((p) => p.id === newPlayerId);
     if (!newPlayer) return;
-    const already = [...m.teamA, ...m.teamB].some((p) => p.id === newPlayerId);
-    if (already) { appAlert("이미 이 경기에 들어가 있는 선수예요."); return; }
-    const swap = (team) => team.map((p) => (p.id === oldPlayerId ? { id: newPlayer.id, name: newPlayer.name } : p));
-    const updated = { ...m, teamA: swap(m.teamA), teamB: swap(m.teamB) };
-    persistCourtMatches(courtNum, updated);
+    try {
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const m = current[courtNum];
+        if (!m) return { ok: false, reason: "gone" };
+        const already = [...m.teamA, ...m.teamB].some((p) => p.id === newPlayerId);
+        if (already) return { ok: false, reason: "already" };
+        // 다른 코트에서 이미 뛰고 있는 사람은 아무리 "대기 중" 드롭다운에서 골랐어도 최신 기준으로 다시 막아요.
+        const occupiedElsewhere = new Set();
+        Object.entries(current).forEach(([cn, cm]) => {
+          if (Number(cn) === courtNum) return;
+          if (cm && !cm.done && cm.date === todayStr()) [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id));
+        });
+        if (occupiedElsewhere.has(newPlayerId)) return { ok: false, reason: "elsewhere" };
+        const swap = (team) => team.map((p) => (p.id === oldPlayerId ? { id: newPlayer.id, name: newPlayer.name } : p));
+        const updated = { ...m, teamA: swap(m.teamA), teamB: swap(m.teamB) };
+        const next = { ...current, [courtNum]: updated };
+        tx.set(REFS.courtmatches, { data: next });
+        return { ok: true };
+      });
+      if (result && result.ok === false) {
+        if (result.reason === "already") appAlert("이미 이 경기에 들어가 있는 선수예요.");
+        else if (result.reason === "elsewhere") appAlert("⚠️ 그 사이 다른 코트에 이미 배정된 선수예요. 화면이 최신 상태로 갱신됐어요, 다시 골라주세요.");
+        return;
+      }
+    } catch (e) {
+      appAlert("선수 교체에 실패했어요. 다시 시도해주세요.");
+      return;
+    }
     setEditingCourt(null);
   }
 
@@ -1557,7 +1596,10 @@ function App() {
     setPinnedPair([]);
   }
 
-  function startCourtWithFour(courtNum, four) {
+  // 이 코트에 배정하려는 4명 중, 지금 이 순간(서버 최신 기준) 이미 다른 코트에서 뛰고 있는 사람이 있는지 확인해요.
+  // "직접 4명 선택" 화면을 여러 코트에서 동시에 열어놓고 고를 때, 화면에 아직 반영 안 된 최신 배정과
+  // 겹쳐서 같은 사람이 두 코트에 동시에 들어가는 걸 막기 위한 최종 안전장치예요.
+  async function startCourtWithFour(courtNum, four) {
     let a, b;
     const pinnedInFour = pinnedPair.filter((id) => four.some((p) => p.id === id));
     if (pinnedInFour.length === 2) {
@@ -1567,8 +1609,31 @@ function App() {
     } else {
       ({ a, b } = splitScore(four, matchCtx));
     }
-    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
-    persistCourtMatches(courtNum, match);
+    try {
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const occupiedElsewhere = new Set();
+        Object.entries(current).forEach(([cn, m]) => {
+          if (Number(cn) === courtNum) return;
+          if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => occupiedElsewhere.add(p.id));
+        });
+        const conflict = four.find((p) => occupiedElsewhere.has(p.id));
+        if (conflict) return { ok: false, conflictName: conflict.name };
+        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
+        const next = { ...current, [courtNum]: match };
+        tx.set(REFS.courtmatches, { data: next });
+        return { ok: true };
+      });
+      if (result && result.ok === false) {
+        appAlert(`⚠️ ${result.conflictName}님은 이미 다른 코트에서 뛰고 있어서 이 코트에는 배정할 수 없어요. 화면이 최신 상태로 갱신됐어요, 다시 골라주세요.`);
+        return;
+      }
+    } catch (e) {
+      appAlert("매칭 생성에 실패했어요. 다시 시도해주세요.");
+      return;
+    }
     setMatchSeq((n) => n + 1);
     setManualCourt(null);
     setManualSelected([]);
@@ -1601,29 +1666,55 @@ function App() {
 
 
   // 관리자: 이미 시작한(아직 안 끝난) 경기도 팀을 다시 섞어요
-  function reshuffleCourt(courtNum) {
+  async function reshuffleCourt(courtNum) {
     if (!adminOn) { tryAdminUnlock(); return; }
     const m = courtMatches[courtNum];
     if (!m) return;
-    const current4 = [...m.teamA, ...m.teamB];
-    // 그 사이 "쉴래요"/"먼저 갈게요"를 누른 사람이 있으면 빼고, 대기 중인 사람으로 채워요.
-    const staying = current4.filter((p) => !restWish[p.id] && !leftEarly[p.id]);
-    const leaving = current4.filter((p) => restWish[p.id] || leftEarly[p.id]);
-    let four = current4;
-    if (leaving.length > 0) {
-      const candidates = shuffleArr(waitingPlayers.filter((p) => !current4.some((x) => x.id === p.id)));
-      if (candidates.length < leaving.length) {
-        appAlert(`쉬거나 먼저 가는 사람이 있어서 대기 인원이 부족해요. (${leaving.length - candidates.length}명 더 필요해요)`);
-        return;
+    try {
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const freshM = current[courtNum];
+        if (!freshM) return { ok: false, reason: "gone" };
+        const current4 = [...freshM.teamA, ...freshM.teamB];
+        // 그 사이 "쉴래요"/"먼저 갈게요"를 누른 사람이 있으면 빼고, 대기 중인 사람으로 채워요.
+        const staying = current4.filter((p) => !restWish[p.id] && !leftEarly[p.id]);
+        const leaving = current4.filter((p) => restWish[p.id] || leftEarly[p.id]);
+        // ⚠️ 다른 코트가 최신으로 어떤지 지금 이 순간 기준으로 다시 확인해요 — 화면(로컬 상태)이 아직 안 따라왔을 수 있어서
+        // 이미 다른 코트에 배정된 사람이 대기 후보로 잘못 뽑히는 걸 막아요.
+        const occupiedElsewhere = new Set();
+        Object.entries(current).forEach(([cn, cm]) => {
+          if (Number(cn) === courtNum) return;
+          if (cm && !cm.done && cm.date === todayStr()) [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id));
+        });
+        let four = current4;
+        if (leaving.length > 0) {
+          const candidates = shuffleArr(
+            players.filter(
+              (p) => !current4.some((x) => x.id === p.id) && !occupiedElsewhere.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id)
+            )
+          );
+          if (candidates.length < leaving.length) {
+            return { ok: false, reason: "notEnough", need: leaving.length - candidates.length };
+          }
+          four = [...staying, ...candidates.slice(0, leaving.length)];
+        }
+        // 지금이랑 완전히 똑같은 조합이 나오면 "안 바뀐 것처럼" 보이니까, 지금 조합은 후보에서 빼고
+        // 남은 조합들 중에서 골라요 — 그래도 다 똑같으면(사실상 조합이 하나뿐일 때) 무작위로라도 하나 골라요.
+        const currentKey = `${four[0].id}|${four[1].id}`;
+        const { a, b } = splitScore(four, matchCtx, currentKey);
+        const match = { ...freshM, teamA: a, teamB: b, scoreA: "", scoreB: "", winnerOverride: null, captainId: pickCaptain(a, b) };
+        const next = { ...current, [courtNum]: match };
+        tx.set(REFS.courtmatches, { data: next });
+        return { ok: true };
+      });
+      if (result && result.ok === false && result.reason === "notEnough") {
+        appAlert(`쉬거나 먼저 가는 사람이 있어서 대기 인원이 부족해요. (${result.need}명 더 필요해요)`);
       }
-      four = [...staying, ...candidates.slice(0, leaving.length)];
+    } catch (e) {
+      appAlert("팀을 다시 섞는 데 실패했어요. 다시 시도해주세요.");
     }
-    // 지금이랑 완전히 똑같은 조합이 나오면 "안 바뀐 것처럼" 보이니까, 지금 조합은 후보에서 빼고
-    // 남은 조합들 중에서 골라요 — 그래도 다 똑같으면(사실상 조합이 하나뿐일 때) 무작위로라도 하나 골라요.
-    const currentKey = `${four[0].id}|${four[1].id}`;
-    const { a, b } = splitScore(four, matchCtx, currentKey);
-    const match = { ...m, teamA: a, teamB: b, scoreA: "", scoreB: "", winnerOverride: null, captainId: pickCaptain(a, b) };
-    persistCourtMatches(courtNum, match);
   }
 
   // 전체 다시 섞기 — "팀 다시 섞기"는 그 코트 4명 안에서만 섞이지만, 이건 진짜로 지금 뛰고 있는
@@ -1814,7 +1905,7 @@ function App() {
 
       <section className="px-5 max-w-2xl mx-auto mb-4 flex items-center justify-between">
         <div className="flex gap-3 text-xs text-stone-500">
-          <span>참석 <b className="text-stone-800">{players.length}</b>명</span>
+          <span>참석 <b className="text-stone-800">{activePlayers.length}</b>명</span>
           <span>·</span>
           <span>코트 <b className="text-stone-800">{numCourts}</b>면</span>
           {Object.values(courtMatches).some((m) => m && !m.done) && (
@@ -2046,7 +2137,7 @@ function App() {
           )}
 
           <div>
-            <p className="text-sm font-semibold mb-2">오늘 참석자 ({players.length}명)</p>
+            <p className="text-sm font-semibold mb-2">오늘 참석자 ({activePlayers.length}명)</p>
             <p className="text-[11px] mb-1" style={{ color: "var(--bc-blue)" }}>✅ 더보기 → 일정에서 참석 체크하면 자동으로 여기 반영돼요.</p>
             <p className="text-[11px] text-stone-400 mb-2">🔥상위 · ➖중위 · 🌱하위 등급으로 나눠서, 매칭 생성할 때 자동으로 실력 밸런스를 맞춰요. (최소 {MIN_GAMES_FOR_TIER}경기 이상부터 등급 계산돼요)</p>
             {adminOn && (
@@ -2130,7 +2221,7 @@ function App() {
           {/* 오늘 운영 현황 — 매칭 화면 켜자마자 1초 만에 상황 파악 */}
           <div className="bc-card px-4 py-3">
             <p className="text-sm font-semibold text-stone-700">
-              🏸 {players.length}명 참석 · <span style={{ color: "var(--bc-blue)" }}>{occupiedIds.size}명 경기 중</span> · {waitingPlayers.length}명 대기
+              🏸 {activePlayers.length}명 참석 · <span style={{ color: "var(--bc-blue)" }}>{occupiedIds.size}명 경기 중</span> · {displayWaitingCount}명 대기
             </p>
             {waitingPlayers.length > 0 && (
               <p className="text-xs text-stone-400 mt-1">
@@ -2227,7 +2318,7 @@ function App() {
                 ) : (
                   /* ① 매칭 준비 */
                   <div className="px-4 pt-2 pb-4">
-                    <p className="text-xs text-stone-400 mb-3">참석 {players.length}명 · 코트 {numCourts}개</p>
+                    <p className="text-xs text-stone-400 mb-3">참석 {activePlayers.length}명 · 코트 {numCourts}개</p>
                     <div className="flex gap-2 mb-3">
                       <span className="bc-badge2 bc-badge2-playing">🟢 게임 중 {occupiedIds.size}명</span>
                       <span className="bc-badge2 bc-badge2-waiting">🟡 대기 {readyCount}명</span>
@@ -2342,17 +2433,17 @@ function App() {
               </div>
               <div className="rounded-xl p-2.5" style={{ backgroundColor: "var(--bc-orange-soft)" }}>
                 <p className="text-[11px] text-stone-500">🟡 대기 중</p>
-                <p className="headfont text-xl" style={{ color: "var(--bc-orange)" }}>{waitingPlayers.length}<span className="text-xs font-normal">명</span></p>
+                <p className="headfont text-xl" style={{ color: "var(--bc-orange)" }}>{displayWaitingCount}<span className="text-xs font-normal">명</span></p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <p className="text-[11px] text-stone-400">오늘 참석</p>
-                <p className="headfont text-2xl text-stone-800">{players.length}<span className="text-sm font-normal">명</span></p>
+                <p className="headfont text-2xl text-stone-800">{activePlayers.length}<span className="text-sm font-normal">명</span></p>
               </div>
               <div>
                 <p className="text-[11px] text-stone-400">추천 코트 수</p>
-                <p className="headfont text-2xl text-stone-800">{Math.max(1, Math.floor(players.length / 4)) || 0}<span className="text-sm font-normal">면</span></p>
+                <p className="headfont text-2xl text-stone-800">{Math.max(1, Math.floor(activePlayers.length / 4)) || 0}<span className="text-sm font-normal">면</span></p>
               </div>
               <div className="col-span-2">
                 <p className="text-[11px] text-stone-400">다음 추천</p>
