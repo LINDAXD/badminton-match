@@ -898,15 +898,51 @@ function App() {
   const tierBadge = { 상: { emoji: "🔥", color: "text-red-500" }, 중: { emoji: "➖", color: "text-stone-400" }, 하: { emoji: "🌱", color: "text-green-600" } };
 
   // 관리자가 개인 전적을 직접 원하는 값으로 고쳐요 (실제 경기기록은 그대로 두고, 보정값만 얹어요)
-  // 개별 경기 기록의 점수를 직접 고쳐요 — 이렇게 하면 그 경기가 걸려있는 승/패, 통산 순위도 자동으로 같이 맞춰져요
-  // (따로 "승/패 보정"을 안 해도, 애초에 원인이 되는 점수 자체를 고치는 게 더 정확해요).
+  // 개별 경기 기록의 점수를 직접 고쳐요 — 점수를 고치면 그 경기의 승자(winner)도 새 점수에 맞게 같이 고쳐져서
+  // 승/패, 통산 순위가 자동으로 맞춰져요. 만약 그 수정으로 승패가 뒤집히면, 그 경기 때 반영됐던 실력점수(ELO) 변동도
+  // 반대로 되돌려서 다시 적용해요 (안 그러면 실력점수만 예전 결과 그대로 남아있게 돼요).
   async function editMatchRecord(m, field, value) {
     if (!adminOn) return;
+    const newScoreA = field === "scoreA" ? value : m.scoreA;
+    const newScoreB = field === "scoreB" ? value : m.scoreB;
+    const sA = Number(newScoreA), sB = Number(newScoreB);
+    const hasBoth = newScoreA !== "" && newScoreB !== "" && !isNaN(sA) && !isNaN(sB) && sA !== sB;
+    const newWinner = hasBoth ? (sA > sB ? "A" : "B") : null;
+    const oldWinner = m.winner || matchWinnerSide(m);
+    const winnerFlipped = !!(newWinner && oldWinner && newWinner !== oldWinner);
     try {
+      // 승패가 뒤집히면, 그때 적용됐던 실력점수 변동을 반대로 되돌려요 (원래 준 만큼 반대로 두 배 조정)
+      if (winnerFlipped && m.skillDeltas) {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(REFS.roster);
+          const data = snap.data() || {};
+          const list = data.members || [];
+          const next = list.map((mm) => {
+            const d = m.skillDeltas[mm.id];
+            if (!d) return mm;
+            const oldDelta = d.after - d.before;
+            return { ...mm, skillScore: getSkillScore(mm) - oldDelta * 2 };
+          });
+          tx.set(REFS.roster, { members: next });
+        });
+      }
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(REFS.matchhistory);
         const data = snap.data() || {};
-        const items = (data.items || []).map((it) => it.id === m.id ? { ...it, [field]: value } : it);
+        const items = (data.items || []).map((it) => {
+          if (it.id !== m.id) return it;
+          const updated = { ...it, [field]: value };
+          if (newWinner) updated.winner = newWinner;
+          if (winnerFlipped && it.skillDeltas) {
+            const flipped = {};
+            Object.entries(it.skillDeltas).forEach(([id, d]) => {
+              const oldDelta = d.after - d.before;
+              flipped[id] = { before: d.before, after: d.before - oldDelta };
+            });
+            updated.skillDeltas = flipped;
+          }
+          return updated;
+        });
         tx.set(REFS.matchhistory, { items });
       });
     } catch (e) {
