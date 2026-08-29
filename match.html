@@ -2743,22 +2743,22 @@ function App() {
                     </div>
                     <p className="text-center text-[10px] text-stone-400 -mt-2 mb-1">VS</p>
                     <div className="flex items-center justify-center gap-3 pb-4">
-                      <input
+                      <NumberSelect
+                        value={m.scoreA === "" ? null : Number(m.scoreA)}
+                        onChange={(v) => updateScore(courtNum, "scoreA", v == null ? "" : String(v))}
                         disabled={m.done}
-                        value={m.scoreA}
-                        onChange={(e) => updateScore(courtNum, "scoreA", e.target.value)}
-                        inputMode="numeric"
-                        placeholder="0"
-                        className="scorefont w-14 h-12 text-center text-xl rounded-xl border border-stone-300 bg-stone-50 disabled:bg-stone-100 disabled:text-stone-400"
+                        max={30}
+                        placeholder="-"
+                        unit=""
                       />
                       <span className="text-stone-400">:</span>
-                      <input
+                      <NumberSelect
+                        value={m.scoreB === "" ? null : Number(m.scoreB)}
+                        onChange={(v) => updateScore(courtNum, "scoreB", v == null ? "" : String(v))}
                         disabled={m.done}
-                        value={m.scoreB}
-                        onChange={(e) => updateScore(courtNum, "scoreB", e.target.value)}
-                        inputMode="numeric"
-                        placeholder="0"
-                        className="scorefont w-14 h-12 text-center text-xl rounded-xl border border-stone-300 bg-stone-50 disabled:bg-stone-100 disabled:text-stone-400"
+                        max={30}
+                        placeholder="-"
+                        unit=""
                       />
                     </div>
                     {pendingAutoFinish[courtNum] && (

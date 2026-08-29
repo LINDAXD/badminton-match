@@ -84,6 +84,7 @@ window.REFS = {
   kindvotes: db.collection(BC_COLLECTION).doc("kindvotes"),     // "또 치고싶어요" 익명 투표 (친절왕 집계용)
   dailyvotes: db.collection(BC_COLLECTION).doc("dailyvotes"),   // 오늘의 MVP/친절왕/분위기메이커/성장왕/베스트플레이 익명 투표
   noshows: db.collection(BC_COLLECTION).doc("noshows"),         // 노쇼 기록 (자동/관리자 부여)
+  lates: db.collection(BC_COLLECTION).doc("lates"),             // 지각 기록 (관리자 부여)
   guestlist: db.collection(BC_COLLECTION).doc("guestlist"),     // 가끔 오는 게스트 (날짜별) — 매칭 참석자에 임시로 추가됨
   shuttlecock: db.collection(BC_COLLECTION).doc("shuttlecock"), // 날짜별 셔틀콕 제출 현황
   dailylogin: db.collection(BC_COLLECTION).doc("dailylogin"),   // 로그인 기준 "출석" 기록 (모임 "참석"과는 별개)

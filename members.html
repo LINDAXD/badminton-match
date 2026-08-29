@@ -29,6 +29,7 @@ function App() {
   const [matchhistory, setMatchhistory] = React.useState([]);
   const [dailyvotes, setDailyvotes] = React.useState({});
   const [noshows, setNoshows] = React.useState([]);
+  const [lates, setLates] = React.useState([]);
 
   React.useEffect(() => {
     const unsub = REFS.noshows.onSnapshot((snap) => {
@@ -38,10 +39,24 @@ function App() {
     return () => unsub();
   }, []);
 
+  React.useEffect(() => {
+    const unsub = REFS.lates.onSnapshot((snap) => {
+      const data = snap.data();
+      setLates(data && data.items ? data.items : []);
+    }, () => {});
+    return () => unsub();
+  }, []);
+
   async function giveNoShow(member) {
     if (!(await appConfirm(`"${member.name}"님에게 노쇼 1회를 부여할까요?`))) return;
     const item = { id: uid(), memberId: member.id, date: todayStr(), source: "admin" };
     REFS.noshows.set({ items: [...noshows, item] }).catch(() => {});
+  }
+
+  async function giveLate(member) {
+    if (!(await appConfirm(`"${member.name}"님에게 지각 1회를 부여할까요?`))) return;
+    const item = { id: uid(), memberId: member.id, date: todayStr(), source: "admin" };
+    REFS.lates.set({ items: [...lates, item] }).catch(() => {});
   }
 
   React.useEffect(() => {
@@ -113,6 +128,7 @@ function App() {
     setProfileMember((prev) => (prev ? { ...prev, ...fields } : prev));
   }
   const { adminOn, tryUnlock, lock } = useAdmin(isOfficerOf(roster, myId));
+  const allSessionDates = checkinlog.map((c) => c.date); // 최근 출석일/출석 횟수 계산용 (전체 모임 개최일 목록)
   const [search, setSearch] = React.useState("");
   const [socialFilter, setSocialFilter] = React.useState([]);
 
@@ -300,6 +316,23 @@ function App() {
                             <GradeBadge grade={m.grade} />
                             {m.level && <MiniTag>{m.level}</MiniTag>}
                           </div>
+                          {(() => {
+                            const st = computeAttendanceStats(m.id, checkinlog, allSessionDates);
+                            const noShowCt = computeNoShowCount(m.id, scheduleItems, checkinlog, noshows);
+                            const lateCt = computeLateCount(m.id, lates);
+                            if (st.totalCount === 0) return <p className="text-[11px] text-stone-300 mt-1">아직 출석 기록 없음</p>;
+                            return (
+                              <p className="text-[11px] text-stone-400 mt-1">
+                                최근 {fmtDate(st.lastDate)} · 총 {st.totalCount}회
+                                {(noShowCt > 0 || lateCt > 0) && (
+                                  <span className="ml-1" style={{ color: "#DC7A2E" }}>
+                                    {noShowCt > 0 && ` · 🚫노쇼 ${noShowCt}`}
+                                    {lateCt > 0 && ` · 🕒지각 ${lateCt}`}
+                                  </span>
+                                )}
+                              </p>
+                            );
+                          })()}
                         </div>
                       </button>{adminOn && (
                         <div className="flex items-center gap-3">
@@ -394,7 +427,9 @@ function App() {
           matchhistory={matchhistory}
           dailyvotes={dailyvotes}
           noshows={noshows}
+          lates={lates}
           onGiveNoShow={giveNoShow}
+          onGiveLate={giveLate}
           canEdit={true}
           isAdmin={adminOn}
           isSelf={profileMember.id === myId}

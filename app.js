@@ -311,6 +311,11 @@ function computeNoShowCount(memberId, scheduleItems, checkinlog, noshows) {
   return (noshows || []).filter((n) => n.memberId === memberId).length;
 }
 
+// 지각: 노쇼랑 똑같은 방식 — 상황을 아는 관리자가 회원 프로필 카드에서 직접 부여해요.
+function computeLateCount(memberId, lates) {
+  return (lates || []).filter((n) => n.memberId === memberId).length;
+}
+
 function earnedBadges(member, stats) {
   return window.BADGE_DEFS.filter((b) => {
     try { return b.earn(stats, member); } catch (e) { return false; }
@@ -411,7 +416,7 @@ const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 window.WEEKDAYS = WEEKDAYS;
 
 // ---------- 회원 프로필 카드 (클릭하면 열리는 모달) ----------
-function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems, kindvotes, matchhistory, dailyvotes, noshows, canEdit, isAdmin, isSelf, onSave, onClose, onGiveNoShow }) {
+function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems, kindvotes, matchhistory, dailyvotes, noshows, lates, canEdit, isAdmin, isSelf, onSave, onClose, onGiveNoShow, onGiveLate }) {
   const [edit, setEdit] = useState(false);
   const [bio, setBio] = useState(member.bio || "");
   const [career, setCareer] = useState(member.career || "");
@@ -427,6 +432,7 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
   });
   const badges = earnedBadges(member, stats);
   const noShowCount = computeNoShowCount(member.id, scheduleItems || [], checkinlog, noshows);
+  const lateCount = computeLateCount(member.id, lates);
   const partners = topPartners(member.id, matchhistory || [], 3);
 
   function toggleManualBadge(key) {
@@ -586,6 +592,10 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
               <p className="text-sm font-semibold text-stone-800">{noShowCount}회</p>
             </div>
             <div className="bg-stone-50 rounded-xl p-3">
+              <p className="text-[11px] text-stone-400">🕒 지각</p>
+              <p className="text-sm font-semibold text-stone-800">{lateCount}회</p>
+            </div>
+            <div className="bg-stone-50 rounded-xl p-3">
               <p className="text-[11px] text-stone-400">👍 또 치고싶어요</p>
               <p className="text-sm font-semibold text-stone-800">{stats.kindVotes}표</p>
             </div>
@@ -652,14 +662,27 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
           )}
 
           {isAdmin && onGiveNoShow && (
-            <div>
-              <p className="text-[11px] text-stone-400 mb-1.5">🚫 관리자: 노쇼 부여</p>
-              <button
-                onClick={() => onGiveNoShow(member)}
-                className="text-xs px-2.5 py-1.5 rounded-full border border-red-200 text-red-500 bg-red-50 tap-scale"
-              >
-                🚫 노쇼 1회 추가 (연락 없이 불참)
-              </button>
+            <div className="flex flex-wrap gap-1.5">
+              <div>
+                <p className="text-[11px] text-stone-400 mb-1.5">🚫 관리자: 노쇼 부여</p>
+                <button
+                  onClick={() => onGiveNoShow(member)}
+                  className="text-xs px-2.5 py-1.5 rounded-full border border-red-200 text-red-500 bg-red-50 tap-scale"
+                >
+                  🚫 노쇼 1회 추가 (연락 없이 불참)
+                </button>
+              </div>
+              {onGiveLate && (
+                <div>
+                  <p className="text-[11px] text-stone-400 mb-1.5">🕒 관리자: 지각 부여</p>
+                  <button
+                    onClick={() => onGiveLate(member)}
+                    className="text-xs px-2.5 py-1.5 rounded-full border border-amber-200 text-amber-600 bg-amber-50 tap-scale"
+                  >
+                    🕒 지각 1회 추가
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
