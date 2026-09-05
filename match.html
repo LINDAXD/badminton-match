@@ -528,6 +528,8 @@ function App() {
   const [autoStart, setAutoStart] = useState(false);
   // 점수 입력 후 자동 종료되기까지 기다리는 시간(초) — 관리자가 조절 가능, 기본 6초
   const [autoFinishDelaySec, setAutoFinishDelaySec] = useState(6);
+  // 친선전(점수 없는) 칸 개수 — 기본 1개, 관리자가 늘리거나 줄일 수 있어요
+  const [friendlyCourts, setFriendlyCourts] = useState(1);
 
   // 오늘 운영 카드에서 셔틀콕 제출 현황도 같이 보여주려고, 여기서도 살짝 구독해요 (셔틀콕 패널이랑 매칭 화면이 따로 놀지 않게).
   const [shuttlecockToday, setShuttlecockToday] = useState({ submitted: {}, exempt: {} });
@@ -662,6 +664,7 @@ function App() {
       setMeetingEndedDate((data && data.meetingEndedDate) || null);
       setAutoStart(data && data.autoStart !== undefined ? data.autoStart : false);
       setAutoFinishDelaySec(data && data.autoFinishDelaySec !== undefined ? data.autoFinishDelaySec : 6);
+      setFriendlyCourts(data && data.friendlyCourts !== undefined ? data.friendlyCourts : 1);
     }, () => {});
 
     const unsub9 = REFS.kindvotes.onSnapshot((snap) => {
@@ -702,6 +705,7 @@ function App() {
       meetingEndedDate: patch.meetingEndedDate !== undefined ? patch.meetingEndedDate : meetingEndedDate,
       autoStart: patch.autoStart !== undefined ? patch.autoStart : autoStart,
       autoFinishDelaySec: patch.autoFinishDelaySec !== undefined ? patch.autoFinishDelaySec : autoFinishDelaySec,
+      friendlyCourts: patch.friendlyCourts !== undefined ? patch.friendlyCourts : friendlyCourts,
     };
     setMatchMode(next.mode);
     setExcluded(next.excluded);
@@ -713,6 +717,7 @@ function App() {
     setMeetingEndedDate(next.meetingEndedDate);
     setAutoStart(next.autoStart);
     setAutoFinishDelaySec(next.autoFinishDelaySec);
+    setFriendlyCourts(next.friendlyCourts);
     REFS.matchmode.set(next).catch(() => {});
   }
 
@@ -1596,10 +1601,10 @@ function App() {
   // 🎈 친선전 전용 칸 — 인원이 적어서 정식 코트 로테이션엔 안 넣고 싶지만, 그래도 매칭은 하고 싶을 때 써요.
   // 점수 입력/기록 없이 팀만 나눠주고, matchhistory에 아예 안 남겨서 랭킹·전적·실력점수에 전혀 영향을 안 줘요.
   // 그래도 대기 인원 계산에선 "지금 이 4명은 쓰는 중"으로 잡혀서, 다른 코트랑 겹쳐 배정되진 않아요.
-  const [friendlyBusy, setFriendlyBusy] = useState(false);
-  async function startFriendlyMatch() {
+  const [friendlyBusy, setFriendlyBusy] = useState(null); // 지금 매칭 만드는 중인 슬롯 key
+  async function startFriendlyMatch(slotKey) {
     if (friendlyBusy) return;
-    setFriendlyBusy(true);
+    setFriendlyBusy(slotKey);
     try {
       const result = await db.runTransaction(async (tx) => {
         const snap = await tx.get(REFS.courtmatches);
@@ -1607,26 +1612,34 @@ function App() {
         const current = data.data || {};
         const occupied = new Set();
         Object.entries(current).forEach(([cn, m]) => {
-          if (cn === "friendly") return;
+          if (cn === slotKey) return;
           if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id));
         });
         const pool = players.filter((p) => !occupied.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
         if (pool.length < 4) return { ok: false };
         const four = shuffleArr(pool).slice(0, 4);
         const { a, b } = splitScore(four, matchCtx);
-        const match = { id: uid(), court: "friendly", teamA: a, teamB: b, done: false, date: todayStr(), friendly: true };
-        tx.set(REFS.courtmatches, { data: { ...current, friendly: match } });
+        const match = { id: uid(), court: slotKey, teamA: a, teamB: b, done: false, date: todayStr(), friendly: true };
+        tx.set(REFS.courtmatches, { data: { ...current, [slotKey]: match } });
         return { ok: true };
       });
       if (result && result.ok === false) appAlert(`대기 중인 인원이 4명보다 적어요.`);
     } catch (e) {
       appAlert("매칭 생성에 실패했어요. 다시 시도해주세요.");
     } finally {
-      setFriendlyBusy(false);
+      setFriendlyBusy(null);
     }
   }
-  function finishFriendlyMatch() {
-    persistCourtMatches("friendly", null);
+  function finishFriendlyMatch(slotKey) {
+    persistCourtMatches(slotKey, null);
+  }
+  function addFriendlyCourt() {
+    persistMatchSettings({ friendlyCourts: friendlyCourts + 1 });
+  }
+  function removeFriendlyCourt(slotKey) {
+    // 마지막 칸을 없앨 때, 혹시 그 칸에서 지금 경기 중이면 먼저 비워요
+    if (courtMatches[slotKey] && !courtMatches[slotKey].done) finishFriendlyMatch(slotKey);
+    persistMatchSettings({ friendlyCourts: Math.max(1, friendlyCourts - 1) });
   }
 
   function startMatchOnCourt(courtNum) {
@@ -2979,56 +2992,79 @@ function App() {
           })()}
 
           {(() => {
-            const fr = courtMatches["friendly"];
-            const friendlyMatch = fr && fr.date === todayStr() ? fr : null;
+            const slotKeys = Array.from({ length: friendlyCourts }, (_, i) => `friendly${i + 1}`);
             return (
-              <div className="rise-in bc-card overflow-hidden">
-                <div className="px-4 py-2.5 flex justify-between items-center" style={{ background: "linear-gradient(135deg, #7A5C3E 0%, #4A3524 100%)" }}>
-                  <span className="text-white text-[11px] font-bold uppercase tracking-[0.15em]">🎈 친선전 (점수 없음)</span>
-                  {friendlyMatch && <span className="bc-badge2 bc-badge2-playing">🟢 경기중</span>}
-                </div>
-                <div className="p-4">
-                  <p className="text-xs text-stone-400 mb-3">인원이 적어서 정식 코트 대신 팀만 나눠서 가볍게 칠 때 써요. 여기 경기는 랭킹·전적에 안 남아요.</p>
-                  {friendlyMatch ? (
-                    <>
-                      <div className="grid grid-cols-2 gap-2 mb-3">
-                        <div className="bc-team-a rounded-xl p-3">
-                          <p className="bc-team-label-a text-[10px] font-bold tracking-widest mb-2">🔵 A팀</p>
-                          <p className="text-sm font-semibold leading-tight truncate mb-1">{friendlyMatch.teamA[0].name}</p>
-                          <p className="text-sm font-semibold leading-tight truncate">{friendlyMatch.teamA[1].name}</p>
-                        </div>
-                        <div className="bc-team-b rounded-xl p-3">
-                          <p className="bc-team-label-b text-[10px] font-bold tracking-widest mb-2">🟠 B팀</p>
-                          <p className="text-sm font-semibold leading-tight truncate mb-1">{friendlyMatch.teamB[0].name}</p>
-                          <p className="text-sm font-semibold leading-tight truncate">{friendlyMatch.teamB[1].name}</p>
+              <div className="space-y-3">
+                {slotKeys.map((slotKey, idx) => {
+                  const fr = courtMatches[slotKey];
+                  const friendlyMatch = fr && fr.date === todayStr() ? fr : null;
+                  return (
+                    <div key={slotKey} className="rise-in bc-card overflow-hidden">
+                      <div className="px-4 py-2.5 flex justify-between items-center" style={{ background: "linear-gradient(135deg, #7A5C3E 0%, #4A3524 100%)" }}>
+                        <span className="text-white text-[11px] font-bold uppercase tracking-[0.15em]">
+                          🎈 친선전{friendlyCourts > 1 ? ` ${idx + 1}` : ""} (점수 없음)
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {friendlyMatch && <span className="bc-badge2 bc-badge2-playing">🟢 경기중</span>}
+                          {adminOn && friendlyCourts > 1 && idx === slotKeys.length - 1 && (
+                            <button onClick={() => removeFriendlyCourt(slotKey)} className="text-white/60 text-[11px] underline underline-offset-2">
+                              칸 없애기
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <button
-                        onClick={finishFriendlyMatch}
-                        className="bc-btn-lg w-full text-sm font-semibold"
-                        style={{ backgroundColor: "#7A5C3E", color: "#fff" }}
-                      >
-                        종료하고 자리 비우기
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {waitingPlayers.length < 4 && (
-                        <p className="text-xs font-medium text-center mb-2" style={{ color: "#B98900" }}>
-                          ⚠️ {4 - waitingPlayers.length}명이 더 필요해요 (대기 {waitingPlayers.length}명 / 4명)
-                        </p>
-                      )}
-                      <button
-                        onClick={startFriendlyMatch}
-                        disabled={friendlyBusy || waitingPlayers.length < 4}
-                        className="w-full rounded-xl py-2.5 font-semibold text-sm active:scale-[0.98] transition disabled:opacity-40 disabled:bg-stone-200 disabled:text-stone-400"
-                        style={waitingPlayers.length >= 4 ? { backgroundColor: "#D9B382", color: "#4A3524" } : {}}
-                      >
-                        {friendlyBusy ? "만드는 중..." : "🎈 친선전 매칭 시작"}
-                      </button>
-                    </>
-                  )}
-                </div>
+                      <div className="p-4">
+                        {idx === 0 && (
+                          <p className="text-xs text-stone-400 mb-3">인원이 적어서 정식 코트 대신 팀만 나눠서 가볍게 칠 때 써요. 여기 경기는 랭킹·전적에 안 남아요.</p>
+                        )}
+                        {friendlyMatch ? (
+                          <>
+                            <div className="grid grid-cols-2 gap-2 mb-3">
+                              <div className="bc-team-a rounded-xl p-3">
+                                <p className="bc-team-label-a text-[10px] font-bold tracking-widest mb-2">🔵 A팀</p>
+                                <p className="text-sm font-semibold leading-tight truncate mb-1">{friendlyMatch.teamA[0].name}</p>
+                                <p className="text-sm font-semibold leading-tight truncate">{friendlyMatch.teamA[1].name}</p>
+                              </div>
+                              <div className="bc-team-b rounded-xl p-3">
+                                <p className="bc-team-label-b text-[10px] font-bold tracking-widest mb-2">🟠 B팀</p>
+                                <p className="text-sm font-semibold leading-tight truncate mb-1">{friendlyMatch.teamB[0].name}</p>
+                                <p className="text-sm font-semibold leading-tight truncate">{friendlyMatch.teamB[1].name}</p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => finishFriendlyMatch(slotKey)}
+                              className="bc-btn-lg w-full text-sm font-semibold"
+                              style={{ backgroundColor: "#7A5C3E", color: "#fff" }}
+                            >
+                              종료하고 자리 비우기
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {waitingPlayers.length < 4 && (
+                              <p className="text-xs font-medium text-center mb-2" style={{ color: "#B98900" }}>
+                                ⚠️ {4 - waitingPlayers.length}명이 더 필요해요 (대기 {waitingPlayers.length}명 / 4명)
+                              </p>
+                            )}
+                            <button
+                              onClick={() => startFriendlyMatch(slotKey)}
+                              disabled={!!friendlyBusy || waitingPlayers.length < 4}
+                              className="w-full rounded-xl py-2.5 font-semibold text-sm active:scale-[0.98] transition disabled:opacity-40 disabled:bg-stone-200 disabled:text-stone-400"
+                              style={waitingPlayers.length >= 4 ? { backgroundColor: "#D9B382", color: "#4A3524" } : {}}
+                            >
+                              {friendlyBusy === slotKey ? "만드는 중..." : "🎈 친선전 매칭 시작"}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {adminOn && (
+                  <button onClick={addFriendlyCourt} className="w-full text-xs font-semibold text-stone-400 border border-dashed border-stone-300 rounded-xl py-2.5">
+                    + 친선전 칸 추가
+                  </button>
+                )}
               </div>
             );
           })()}
