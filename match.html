@@ -1089,9 +1089,11 @@ function App() {
         return { ok: true, pulled: true, courtNum, candidateName: candidate.name };
       }).then((result) => {
         if (result && result.pulled) {
-          appAlert(`✅ ${memberName}님을 ${result.courtNum}코트에서 바로 빼고, ${result.candidateName}님으로 교체했어요.`);
+          const place = String(result.courtNum).startsWith("friendly") ? "친선전" : `${result.courtNum}코트`;
+          appAlert(`✅ ${memberName}님을 ${place}에서 바로 빼고, ${result.candidateName}님으로 교체했어요.`);
         } else if (result && result.ok === false) {
-          appAlert(`⚠️ ${memberName}님이 지금 ${result.courtNum}코트에서 뛰고 있는데, 교체할 대기 인원이 없어서 못 뺐어요. 대기자가 생기면 "팀 다시 섞기"로 빼주세요.`);
+          const place = String(result.courtNum).startsWith("friendly") ? "친선전" : `${result.courtNum}코트`;
+          appAlert(`⚠️ ${memberName}님이 지금 ${place}에서 뛰고 있는데, 교체할 대기 인원이 없어서 못 뺐어요. 대기자가 생기면 "팀 다시 섞기"로 빼주세요.`);
         }
       });
     } catch (e) {}
@@ -3038,6 +3040,56 @@ function App() {
                             >
                               종료하고 자리 비우기
                             </button>
+                            {adminOn && (
+                              <div className="pt-1">
+                                <button
+                                  onClick={() => setExpandedTools((t) => ({ ...t, [slotKey]: !t[slotKey] }))}
+                                  className="w-full text-center text-[11px] text-stone-400 py-1"
+                                >
+                                  {expandedTools[slotKey] ? "관리자 도구 접기 ▲" : "⚙️ 관리자 도구 더보기 ▼"}
+                                </button>
+                                {expandedTools[slotKey] && (
+                                  <div className="space-y-2 mt-1">
+                                    <button onClick={() => reshuffleCourt(slotKey)} className="bc-btn-lg w-full text-xs font-semibold border border-stone-200 text-stone-500">
+                                      🔀 팀 다시 섞기
+                                    </button>
+                                    <button
+                                      onClick={() => setEditingCourt(editingCourt === slotKey ? null : slotKey)}
+                                      className="w-full py-2 text-xs font-semibold border border-stone-200 text-stone-500 rounded-xl"
+                                    >
+                                      ✏️ 잘못 들어간 선수 바꾸기
+                                    </button>
+                                    {editingCourt === slotKey && (
+                                      <div className="bg-stone-50 rounded-xl p-2.5 space-y-1.5">
+                                        {[...friendlyMatch.teamA, ...friendlyMatch.teamB].map((p) => (
+                                          <div key={p.id} className="flex items-center gap-2">
+                                            <span className="text-xs text-stone-600 w-16 truncate shrink-0">{p.name}</span>
+                                            <span className="text-stone-300 text-xs">→</span>
+                                            <select
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                if (!val) return;
+                                                swapPlayerInMatch(slotKey, p.id, val);
+                                              }}
+                                              defaultValue=""
+                                              className="flex-1 text-xs border border-stone-200 rounded-lg px-2 py-1"
+                                            >
+                                              <option value="">다른 사람으로 교체...</option>
+                                              {waitingPlayers.map((wp) => (
+                                                <option key={wp.id} value={wp.id}>{wp.name}</option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                        ))}
+                                        {waitingPlayers.length === 0 && (
+                                          <p className="text-[11px] text-stone-400 text-center py-1">지금 바꿀 수 있는 대기 인원이 없어요.</p>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </>
                         ) : (
                           <>
