@@ -1644,7 +1644,7 @@ function App() {
     persistMatchSettings({ friendlyCourts: Math.max(1, friendlyCourts - 1) });
   }
 
-  function startMatchOnCourt(courtNum) {
+  async function startMatchOnCourt(courtNum) {
     if (!adminOn) {
       tryAdminUnlock();
       return;
@@ -1662,9 +1662,38 @@ function App() {
       return;
     }
     const four = pickFourForCourt();
+    if (four.length < 4) {
+      appAlert("대기 중인 인원이 4명 미만이에요. 체크인/참석자를 확인해주세요.");
+      return;
+    }
     const { a, b } = splitScore(four, matchCtx);
-    const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
-    persistCourtMatches(courtNum, match);
+    // ⚠️ 여기까지는 화면에 저장된(약간 구식일 수 있는) 대기 목록 기준으로 고른 4명이에요.
+    // 저장하는 바로 그 순간, 서버 최신 데이터로 이 4명이 진짜 지금 비어있는 사람들인지 다시 한번 확인해서
+    // 다른 코트랑 동시에 시작하다가 같은 사람이 겹쳐 들어가는 일이 없게 해요.
+    try {
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const occupiedElsewhere = new Set();
+        Object.entries(current).forEach(([cn, cm]) => {
+          if (cn === String(courtNum)) return;
+          if (cm && !cm.done && cm.date === todayStr()) [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id));
+        });
+        const conflict = four.find((p) => occupiedElsewhere.has(p.id));
+        if (conflict) return { ok: false, conflictName: conflict.name };
+        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
+        tx.set(REFS.courtmatches, { data: { ...current, [courtNum]: match } });
+        return { ok: true };
+      });
+      if (result && result.ok === false) {
+        appAlert(`⚠️ ${result.conflictName}님은 이미 다른 코트에서 뛰고 있어서 이 코트에는 배정할 수 없어요. 화면이 최신 상태로 갱신됐어요, 다시 시도해주세요.`);
+        return;
+      }
+    } catch (e) {
+      appAlert("매칭 생성에 실패했어요. 다시 시도해주세요.");
+      return;
+    }
     if (matchMode === "skill") persistMatchSettings({ skillRankOffset: skillRankOffset + 1 });
     setMatchSeq((n) => n + 1);
     setTab("match");
