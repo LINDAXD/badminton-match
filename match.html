@@ -525,7 +525,7 @@ function App() {
   const [numCourtsManual, setNumCourtsManual] = useState(false); // 관리자가 +/- 로 직접 바꾼 적 있으면, 인원 변동에 따른 자동 조정을 멈춰요
   const [meetingEndedDate, setMeetingEndedDate] = useState(null);
   // 기본값은 꺼짐이에요 — 처음 체크인했을 때 다들 "대기 중"으로만 보이고, 매칭은 관리자/회원이 직접 눌러야 시작돼요.
-  const [autoStart, setAutoStart] = useState(false);
+  const [autoStart, setAutoStart] = useState(true);
   // 점수 입력 후 자동 종료되기까지 기다리는 시간(초) — 관리자가 조절 가능, 기본 6초
   const [autoFinishDelaySec, setAutoFinishDelaySec] = useState(6);
   // 친선전(점수 없는) 칸 개수 — 기본 1개, 관리자가 늘리거나 줄일 수 있어요
@@ -662,7 +662,7 @@ function App() {
       if (data && data.numCourts) setNumCourts(data.numCourts);
       setNumCourtsManual(!!(data && data.numCourtsManual));
       setMeetingEndedDate((data && data.meetingEndedDate) || null);
-      setAutoStart(data && data.autoStart !== undefined ? data.autoStart : false);
+      setAutoStart(data && data.autoStart !== undefined ? data.autoStart : true);
       setAutoFinishDelaySec(data && data.autoFinishDelaySec !== undefined ? data.autoFinishDelaySec : 6);
       setFriendlyCourts(data && data.friendlyCourts !== undefined ? data.friendlyCourts : 1);
     }, () => {});
@@ -1077,7 +1077,7 @@ function App() {
         const [courtNum, m] = entry;
         const occupied = new Set();
         Object.values(current).forEach((cm) => {
-          if (cm && !cm.done && cm.date === todayStr()) [...cm.teamA, ...cm.teamB].forEach((p) => occupied.add(p.id));
+          if (cm && !cm.done && cm.date === todayStr()) { [...cm.teamA, ...cm.teamB].forEach((p) => occupied.add(p.id)); if (cm.next) [...cm.next.teamA, ...cm.next.teamB].forEach((p) => occupied.add(p.id)); }
         });
         const candidate = players.find(
           (p) => !occupied.has(p.id) && p.id !== memberId && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id)
@@ -1336,6 +1336,20 @@ function App() {
   }
 
   // 나 지금 뭐 하고 있는지 — 코트 하나하나 뒤질 필요 없이 한눈에 보여주기 위한 계산이에요.
+  // 내가 어느 코트의 "다음 경기"에 미리 잡혀 있는지 — 지금 경기 끝나면 바로 어디서 누구랑 하는지 알려줘요.
+  function findMyNext() {
+    for (const [cn, cm] of Object.entries(courtMatches)) {
+      if (!cm || cm.done || cm.date !== todayStr() || !cm.next) continue;
+      const inA = cm.next.teamA.some((x) => x.id === myId);
+      const inB = cm.next.teamB.some((x) => x.id === myId);
+      if (!inA && !inB) continue;
+      const mine = inA ? cm.next.teamA : cm.next.teamB;
+      const theirs = inA ? cm.next.teamB : cm.next.teamA;
+      const mate = mine.find((p) => p.id !== myId);
+      return { court: cn, teammate: mate ? mate.name : "", opponents: theirs.map((p) => p.name) };
+    }
+    return null;
+  }
   const myStatus = (() => {
     if (!myId) return null;
     for (const [courtNum, m] of Object.entries(courtMatches)) {
@@ -1345,9 +1359,11 @@ function App() {
         const onTeamA = m.teamA.some((x) => x.id === myId);
         const teammate = (onTeamA ? m.teamA : m.teamB).find((p) => p.id !== myId);
         const opponents = (onTeamA ? m.teamB : m.teamA).map((p) => p.name);
-        return { type: "playing", court: courtNum, teammate: teammate ? teammate.name : "", opponents, isCaptain: m.captainId === myId };
+        return { type: "playing", court: courtNum, teammate: teammate ? teammate.name : "", opponents, isCaptain: m.captainId === myId, next: findMyNext() };
       }
     }
+    const myNextOnly = findMyNext();
+    if (myNextOnly) return { type: "queued", court: myNextOnly.court, teammate: myNextOnly.teammate, opponents: myNextOnly.opponents };
     const idx = waitingPlayers.findIndex((p) => p.id === myId);
     if (idx >= 0) return { type: "waiting", position: idx + 1, soon: idx < 4 };
     if (players.some((p) => p.id === myId)) return { type: "resting" };
@@ -1396,7 +1412,7 @@ function App() {
         const occupiedElsewhere = new Set();
         Object.entries(current).forEach(([cn, cm]) => {
           if (Number(cn) === courtNum) return;
-          if (cm && !cm.done && cm.date === todayStr()) [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id));
+          if (cm && !cm.done && cm.date === todayStr()) { [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id)); if (cm.next) [...cm.next.teamA, ...cm.next.teamB].forEach((p) => occupiedElsewhere.add(p.id)); }
         });
         if (occupiedElsewhere.has(newPlayerId)) return { ok: false, reason: "elsewhere" };
         const swap = (team) => team.map((p) => (p.id === oldPlayerId ? { id: newPlayer.id, name: newPlayer.name } : p));
@@ -1461,7 +1477,7 @@ function App() {
         // 트랜잭션 안에서 "지금 진짜로 안 뛰고 있는 사람"을 다시 계산해요 (최신 데이터 기준으로, 중복 배정 방지)
         const occupied = new Set();
         Object.values(current).forEach((m) => {
-          if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id));
+          if (m && !m.done && m.date === todayStr()) { [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id)); if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => occupied.add(p.id)); }
         });
         // ⚠️ waitingPlayers(화면에 보이는 값)는 여러 코트를 연달아 자동배정할 때 아직 최신 반영이 안 됐을 수 있어서,
         // 오늘 참석자 전체(players)에서 지금 이 순간 기준으로 다시 걸러요. 방금 다른 코트에 배정된 사람이
@@ -1537,6 +1553,83 @@ function App() {
     });
   }, [autoStart, waitingPlayers.length, courtMatches, numCourts, lockedCourts, meetingEndedToday, myId]);
 
+  // ⏭️ 다음 경기 자동 예약 — 코트에서 경기가 진행 중인 동안, 대기 중인 사람 4명으로 "다음 경기"를 미리 짜둬요.
+  // 경기가 끝나면 finishMatch가 이 예약을 바로 다음 경기로 시작하고, 그러면 또 다음 경기가 자동으로 예약돼요 (연속 진행).
+  // 모든 회원 화면에 "다음 경기: 누구랑 어디서"가 보여요. 트랜잭션이라 여러 명이 같이 열어놔도 중복 예약이 안 생겨요.
+  async function queueNextMatchAsMember(courtNum, opts) {
+    const allowPartial = opts && opts.allowPartial;
+    try {
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const data = snap.data() || {};
+        const current = data.data || {};
+        const cur = current[courtNum];
+        if (!cur || cur.done || cur.date !== todayStr() || cur.next || cur.friendly) return { ok: false };
+        const occupied = new Set();
+        Object.values(current).forEach((m) => {
+          if (m && !m.done && m.date === todayStr()) {
+            [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id));
+            if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => occupied.add(p.id));
+          }
+        });
+        const pool = players.filter((p) => !occupied.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
+        let four;
+        if (pool.length >= 4) {
+          four = pickFromPool(pool, 4);
+        } else if (allowPartial && pool.length >= 1) {
+          // 대기 인원이 4명이 안 될 땐(예: 13명인데 3코트), 대기 중인 사람은 무조건 넣고 모자란 자리는 지금 이 코트에서 뛰는 사람들로 채워요.
+          // 어차피 경기가 끝나면 "방금 끝난 사람 + 대기자" 중에서 4명을 고르게 되는 것과 같은 결과를 미리 보여주는 거예요.
+          const mine = shuffleArr([...cur.teamA, ...cur.teamB]).slice(0, 4 - pool.length);
+          four = [...pool, ...mine];
+        } else {
+          return { ok: false };
+        }
+        const { a, b } = splitScore(four, matchCtx);
+        tx.set(REFS.courtmatches, { data: { ...current, [courtNum]: { ...cur, next: { teamA: a, teamB: b, captainId: pickCaptain(a, b) } } } });
+        return { ok: true, pool, pickedIds: four.map((p) => p.id) };
+      });
+      if (result && result.ok) updateBenchedAfterPick(result.pool, result.pickedIds);
+      return !!(result && result.ok);
+    } catch (e) {
+      return false;
+    }
+  }
+  async function resetQueuedNext(courtNum) {
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const current = (snap.data() || {}).data || {};
+        const cur = current[courtNum];
+        if (!cur || !cur.next) return;
+        const { next, ...rest } = cur;
+        tx.set(REFS.courtmatches, { data: { ...current, [courtNum]: rest } });
+      });
+    } catch (e) {
+      appAlert("다음 경기를 다시 짜지 못했어요. 다시 시도해주세요.");
+    }
+  }
+  const autoQueueInFlight = useRef(false);
+  useEffect(() => {
+    if (!autoStart || meetingEndedToday || autoQueueInFlight.current) return;
+    if (waitingPlayers.length < 1) return;
+    const targets = Object.entries(courtMatches)
+      .filter(([cn, m]) => m && !m.done && m.date === todayStr() && !m.next && !m.friendly && Number(cn) <= numCourts && !lockedCourts.includes(Number(cn)))
+      .map(([cn]) => Number(cn));
+    if (targets.length === 0) return;
+    // 점수가 가장 많이 쌓인(=곧 끝날 것 같은) 코트부터 다음 경기를 채워줘요
+    const progress = (cn) => { const m = courtMatches[cn]; return (Number(m.scoreA) || 0) + (Number(m.scoreB) || 0); };
+    targets.sort((x, y) => progress(y) - progress(x) || x - y);
+    autoQueueInFlight.current = true;
+    (async () => {
+      for (const cn of targets) {
+        const ok = await queueNextMatchAsMember(cn, { allowPartial: true });
+        if (!ok) break;
+      }
+    })().finally(() => {
+      setTimeout(() => { autoQueueInFlight.current = false; }, 1500);
+    });
+  }, [autoStart, waitingPlayers.length, courtMatches, numCourts, lockedCourts, meetingEndedToday]);
+
   // "빈 코트 한번에 매칭 시작" — 처음 참석자 다 모였을 때 관리자든 회원이든 한 번에 눌러서 확 시작할 수 있게 해요.
   const [batchStarting, setBatchStarting] = useState(false);
   const [tierFilter, setTierFilter] = useState("전체"); // 통산 순위 급수 탭 필터
@@ -1559,7 +1652,7 @@ function App() {
         const current = data.data || {};
         const occupied = new Set();
         Object.values(current).forEach((m) => {
-          if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id));
+          if (m && !m.done && m.date === todayStr()) { [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id)); if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => occupied.add(p.id)); }
         });
         // 1) 누가 들어갈지: 방금 게임에 못 들어가고 밀린 사람은 반드시 포함, 나머지는 랜덤으로 채워요.
         const priorityPool = players.filter((p) => !occupied.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
@@ -1615,7 +1708,7 @@ function App() {
         const occupied = new Set();
         Object.entries(current).forEach(([cn, m]) => {
           if (cn === slotKey) return;
-          if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id));
+          if (m && !m.done && m.date === todayStr()) { [...m.teamA, ...m.teamB].forEach((p) => occupied.add(p.id)); if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => occupied.add(p.id)); }
         });
         const pool = players.filter((p) => !occupied.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
         if (pool.length < 4) return { ok: false };
@@ -1678,7 +1771,7 @@ function App() {
         const occupiedElsewhere = new Set();
         Object.entries(current).forEach(([cn, cm]) => {
           if (cn === String(courtNum)) return;
-          if (cm && !cm.done && cm.date === todayStr()) [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id));
+          if (cm && !cm.done && cm.date === todayStr()) { [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id)); if (cm.next) [...cm.next.teamA, ...cm.next.teamB].forEach((p) => occupiedElsewhere.add(p.id)); }
         });
         const conflict = four.find((p) => occupiedElsewhere.has(p.id));
         if (conflict) return { ok: false, conflictName: conflict.name };
@@ -1754,7 +1847,7 @@ function App() {
         const occupiedElsewhere = new Set();
         Object.entries(current).forEach(([cn, m]) => {
           if (Number(cn) === courtNum) return;
-          if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => occupiedElsewhere.add(p.id));
+          if (m && !m.done && m.date === todayStr()) { [...m.teamA, ...m.teamB].forEach((p) => occupiedElsewhere.add(p.id)); if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => occupiedElsewhere.add(p.id)); }
         });
         const conflict = four.find((p) => occupiedElsewhere.has(p.id));
         if (conflict) return { ok: false, conflictName: conflict.name };
@@ -1823,7 +1916,7 @@ function App() {
         const occupiedElsewhere = new Set();
         Object.entries(current).forEach(([cn, cm]) => {
           if (Number(cn) === courtNum) return;
-          if (cm && !cm.done && cm.date === todayStr()) [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id));
+          if (cm && !cm.done && cm.date === todayStr()) { [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id)); if (cm.next) [...cm.next.teamA, ...cm.next.teamB].forEach((p) => occupiedElsewhere.add(p.id)); }
         });
         let four = current4;
         if (leaving.length > 0) {
@@ -2556,7 +2649,7 @@ function App() {
                       <p className="text-white font-bold text-base">{myStatus.court}코트</p>
                     </div>
                     <span className={`bc-badge2 ${myStatus.type === "playing" ? "bc-badge2-playing" : "bc-badge2-waiting"}`}>
-                      {myStatus.type === "playing" ? "🟢 게임 진행 중" : "🔜 곧 시작"}
+                      {myStatus.type === "playing" ? "🟢 게임 진행 중" : "⏭️ 다음 경기"}
                     </span>
                   </div>
                   <div className="px-4 pt-4 pb-4">
@@ -2570,8 +2663,18 @@ function App() {
                       <p className="text-lg font-bold leading-snug" style={{ color: "var(--bc-blue)" }}>{(myStatus.opponents || []).join(" · ") || "상대팀"}</p>
                     </div>
                     <p className="text-center text-sm font-bold mt-3 text-stone-700">
-                      {myStatus.type === "playing" ? `${myStatus.court}코트로 이동해주세요!` : `곧 ${myStatus.court}코트로 이동해주세요!`}
+                      {myStatus.type === "playing" ? `${myStatus.court}코트로 이동해주세요!` : `앞 경기가 끝나면 ${myStatus.court}코트로 이동해주세요!`}
                     </p>
+                    {myStatus.type === "playing" && myStatus.next && (
+                      <div className="mt-3 rounded-xl p-3 border" style={{ borderColor: "var(--bc-line)", backgroundColor: "#F7FAFF" }}>
+                        <p className="text-[11px] font-bold mb-1" style={{ color: "var(--bc-blue)" }}>⏭️ 다음 경기 · {myStatus.next.court}코트</p>
+                        <p className="text-sm font-bold text-stone-800">나{myStatus.next.teammate && <> · {myStatus.next.teammate}</>} <span className="text-stone-400">vs</span> {myStatus.next.opponents.join(" · ")}</p>
+                        <p className="text-[11px] text-stone-400 mt-1">지금 경기가 끝나면 바로 시작해요.</p>
+                      </div>
+                    )}
+                    {myStatus.type === "playing" && !myStatus.next && (
+                      <p className="text-center text-[11px] text-stone-400 mt-2">⏳ 다음 경기는 대기 인원이 4명 차면 자동으로 정해져요.</p>
+                    )}
                     {myStatus.isCaptain && (
                       <p className="text-center text-xs font-bold mt-2 rounded-xl py-2" style={{ backgroundColor: "var(--bc-blue-soft)", color: "var(--bc-navy)" }}>
                         🖊️ 이번 경기 점수 기록 담당이에요! 끝나면 결과를 입력해주세요.
@@ -2855,6 +2958,17 @@ function App() {
                     )}
                     {!m.done ? (
                       <div className="px-4 pb-4 space-y-2">
+                        {m.next && (
+                          <div className="rounded-xl px-3 py-2 border flex items-center justify-between gap-2" style={{ borderColor: "var(--bc-line)", backgroundColor: "#F7FAFF" }}>
+                            <p className="text-xs text-stone-700 min-w-0">
+                              <span className="font-bold" style={{ color: "var(--bc-blue)" }}>⏭️ 다음 경기 </span>
+                              {m.next.teamA.map((p) => p.name).join("·")} <span className="text-stone-400">vs</span> {m.next.teamB.map((p) => p.name).join("·")}
+                            </p>
+                            {adminOn && (
+                              <button onClick={() => resetQueuedNext(courtNum)} className="text-[11px] text-stone-400 underline underline-offset-2 shrink-0">다시 짜기</button>
+                            )}
+                          </div>
+                        )}
                         {/* 점수 입력이 귀찮으면, 승리팀만 골라도 경기를 끝낼 수 있어요 */}
                         <div className="flex gap-2">
                           <button
