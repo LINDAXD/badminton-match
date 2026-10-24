@@ -148,6 +148,10 @@ function App() {
   }, []);
 
   function approveRequest(req) {
+    if (roster.some((r) => (r.name || "").trim().normalize("NFC") === (req.name || "").trim().normalize("NFC"))) {
+      appAlert(`"${req.name}" 이름은 이미 회원에 있어요. 같은 이름은 두 번 등록할 수 없어요. 신청을 거절해 주세요.`);
+      return;
+    }
     const member = { id: uid(), name: req.name, grade: "신입회원", joinedAt: todayStr(), birthday: "", pin: req.pin, level: req.level || "초보" };
     persist([...roster, member]);
     const next = pending.filter((p) => p.id !== req.id);

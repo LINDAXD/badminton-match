@@ -1342,6 +1342,11 @@ function App() {
     if (!adminOn) { tryAdminUnlock(); return; }
     const trimmed = guestName.trim();
     if (!trimmed) return;
+    const norm = (x) => (x || "").replace(/\s*\(게스트\)\s*$/, "").trim().normalize("NFC");
+    if (roster.some((r) => norm(r.name) === norm(trimmed)) || players.some((p) => norm(p.name) === norm(trimmed))) {
+      appAlert(`"${trimmed}" 이름은 이미 있어요. 같은 이름은 두 번 넣을 수 없어요.`);
+      return;
+    }
     const guestId = "guest_" + uid();
     const entry = { id: guestId, name: trimmed, date: todayStr() };
     setPlayers((p) => [...p, { id: guestId, name: `${trimmed} (게스트)`, gamesPlayed: 0, wins: 0, losses: 0 }]);
@@ -1461,6 +1466,7 @@ function App() {
 
   // 나 지금 뭐 하고 있는지 — 코트 하나하나 뒤질 필요 없이 한눈에 보여주기 위한 계산이에요.
   // 내가 어느 코트의 "다음 경기"에 미리 잡혀 있는지 — 지금 경기 끝나면 바로 어디서 누구랑 하는지 알려줘요.
+  const myDisplayName = ((roster.find((r) => r.id === myId)) || {}).name || "나";
   function findMyNext() {
     for (const [cn, cm] of Object.entries(courtMatches)) {
       if (!cm || cm.done || cm.date !== todayStr() || !cm.next) continue;
@@ -2763,7 +2769,7 @@ function App() {
               </div>
             );
           })()}
-          {myStatus && !meetingEndedToday && (
+          {myStatus && !meetingEndedToday && !adminOn && (
             <div className="bc-card overflow-hidden">
               {(myStatus.type === "playing" || myStatus.type === "queued") && (
                 <>
@@ -2779,12 +2785,12 @@ function App() {
                   <div className="px-4 pt-4 pb-4">
                     <div className="rounded-xl p-3.5 text-center" style={{ backgroundColor: "var(--bc-navy)" }}>
                       <p className="text-[11px] font-bold tracking-widest mb-1 text-white/70">A팀</p>
-                      <p className="text-lg font-bold leading-snug text-white">나{myStatus.teammate && <> · {myStatus.teammate}</>}</p>
+                      <p className="text-lg font-bold leading-snug text-white">{myDisplayName}(나){myStatus.teammate && <> + {myStatus.teammate}</>}</p>
                     </div>
                     <p className="text-center text-xs text-stone-400 my-2 font-bold">VS</p>
                     <div className="rounded-xl p-3.5 text-center" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
                       <p className="text-[11px] font-bold tracking-widest mb-1" style={{ color: "var(--bc-blue)" }}>B팀</p>
-                      <p className="text-lg font-bold leading-snug" style={{ color: "var(--bc-blue)" }}>{(myStatus.opponents || []).join(" · ") || "상대팀"}</p>
+                      <p className="text-lg font-bold leading-snug" style={{ color: "var(--bc-blue)" }}>{(myStatus.opponents || []).join(" + ") || "상대팀"}</p>
                     </div>
                     <p className="text-center text-sm font-bold mt-3 text-stone-700">
                       {myStatus.type === "playing" ? `${myStatus.court}코트로 이동해주세요!` : `앞 경기가 끝나면 ${myStatus.court}코트로 이동해주세요!`}
@@ -2792,7 +2798,7 @@ function App() {
                     {myStatus.type === "playing" && myStatus.next && (
                       <div className="mt-3 rounded-xl p-3 border" style={{ borderColor: "var(--bc-line)", backgroundColor: "#F7FAFF" }}>
                         <p className="text-[11px] font-bold mb-1" style={{ color: "var(--bc-blue)" }}>⏭️ 다음 경기 · {myStatus.next.court}코트</p>
-                        <p className="text-sm font-bold text-stone-800">나{myStatus.next.teammate && <> · {myStatus.next.teammate}</>} <span className="text-stone-400">vs</span> {myStatus.next.opponents.join(" · ")}</p>
+                        <p className="text-sm font-bold text-stone-800">{myDisplayName}(나){myStatus.next.teammate && <> + {myStatus.next.teammate}</>} <span className="text-stone-400">vs</span> {myStatus.next.opponents.join(" + ")}</p>
                         <p className="text-[11px] text-stone-400 mt-1">지금 경기가 끝나면 바로 시작해요.</p>
                       </div>
                     )}
@@ -3123,7 +3129,7 @@ function App() {
                           <div className="rounded-xl px-3 py-2 border flex items-center justify-between gap-2" style={{ borderColor: "var(--bc-line)", backgroundColor: "#F7FAFF" }}>
                             <p className="text-xs text-stone-700 min-w-0">
                               <span className="font-bold" style={{ color: "var(--bc-blue)" }}>⏭️ 다음 경기 </span>
-                              {m.next.teamA.map((p) => p.name).join("·")} <span className="text-stone-400">vs</span> {m.next.teamB.map((p) => p.name).join("·")}
+                              {m.next.teamA.map((p) => p.name).join(" + ")} <span className="text-stone-400">vs</span> {m.next.teamB.map((p) => p.name).join(" + ")}
                             </p>
                             {adminOn && (
                               <button onClick={() => resetQueuedNext(courtNum)} className="text-[11px] text-stone-400 underline underline-offset-2 shrink-0">다시 짜기</button>
