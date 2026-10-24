@@ -522,6 +522,7 @@ function App() {
   const [copyMsg, setCopyMsg] = useState("");
   const backupInputRef = useRef(null);
   const [numCourts, setNumCourts] = useState(2);
+  const [matchSettingsLoaded, setMatchSettingsLoaded] = useState(false); // 저장된 설정을 아직 못 불러온 상태에서 자동 조정이 먼저 돌면 "직접 정한 코트 수"를 덮어써요
   const [numCourtsManual, setNumCourtsManual] = useState(false); // 관리자가 +/- 로 직접 바꾼 적 있으면, 인원 변동에 따른 자동 조정을 멈춰요
   const [meetingEndedDate, setMeetingEndedDate] = useState(null);
   // 기본값은 꺼짐이에요 — 처음 체크인했을 때 다들 "대기 중"으로만 보이고, 매칭은 관리자/회원이 직접 눌러야 시작돼요.
@@ -661,6 +662,7 @@ function App() {
       setSkillRankOffset((data && data.skillRankOffset) || 0);
       if (data && data.numCourts) setNumCourts(data.numCourts);
       setNumCourtsManual(!!(data && data.numCourtsManual));
+      setMatchSettingsLoaded(true);
       setMeetingEndedDate((data && data.meetingEndedDate) || null);
       setAutoStart(data && data.autoStart !== undefined ? data.autoStart : true);
       setAutoFinishDelaySec(data && data.autoFinishDelaySec !== undefined ? data.autoFinishDelaySec : 6);
@@ -894,9 +896,30 @@ function App() {
 
   // 매칭용 실력 지표는 이제 "실력점수(ELO식, 1000점 시작)"를 써요 — 승률이랑은 별개로 관리되는 값이에요.
   // 기존 균형 계산 가중치들이랑 스케일을 맞추려고 0~1 사이로 정규화해요(700~1300점 범위를 0~1로 매핑).
+  // 실력 점수 — 이미 승패 점수가 쌓인 사람은 그 점수를 그대로 쓰고,
+  // 아직 점수가 없는 사람은 "등록한 실력(왕초보≈가입 3개월 / 초보≈3개월~1년 / 그 이상 D조~)"을 시작점으로,
+  // 기존 경기 기록(승률)이 3판 이상 있으면 그 승률만큼 위아래로 조정해요 (판수가 많을수록 승률 영향이 커져요).
+  function seedScore(member) {
+    if (member && typeof member.skillScore === "number") return member.skillScore;
+    const base = getSkillScore(member);
+    if (!member) return base;
+    let g = 0, w = 0;
+    matchhistory.forEach((h) => {
+      const inA = (h.teamA || []).some((x) => x.id === member.id);
+      const inB = (h.teamB || []).some((x) => x.id === member.id);
+      if (!inA && !inB) return;
+      const side = matchWinnerSide(h);
+      if (!side) return;
+      g++;
+      if ((inA && side === "A") || (inB && side === "B")) w++;
+    });
+    if (g < 3) return base;
+    return base + ((w - (g - w)) / (g + 6)) * 300;
+  }
+
   function skillOf(id) {
     const m = roster.find((r) => r.id === id);
-    const raw = getSkillScore(m);
+    const raw = seedScore(m);
     return Math.max(0, Math.min(1, (raw - 700) / 600));
   }
 
@@ -926,7 +949,7 @@ function App() {
             const d = m.skillDeltas[mm.id];
             if (!d) return mm;
             const oldDelta = d.after - d.before;
-            return { ...mm, skillScore: getSkillScore(mm) - oldDelta * 2 };
+            return { ...mm, skillScore: seedScore(mm) - oldDelta * 2 };
           });
           tx.set(REFS.roster, { members: next });
         });
@@ -968,7 +991,7 @@ function App() {
           const list = (snap.data() || {}).members || [];
           tx.set(REFS.roster, { members: list.map((mm) => {
             const d = m.skillDeltas[mm.id];
-            return d ? { ...mm, skillScore: getSkillScore(mm) - (d.after - d.before) * 2 } : mm;
+            return d ? { ...mm, skillScore: seedScore(mm) - (d.after - d.before) * 2 } : mm;
           }) });
         });
       }
@@ -1011,8 +1034,8 @@ function App() {
           const snap = await tx.get(REFS.roster);
           const list = (snap.data() || {}).members || [];
           tx.set(REFS.roster, { members: list.map((mm) => {
-            if (mm.id === oldId) return { ...mm, skillScore: getSkillScore(mm) - delta };
-            if (mm.id === newId) { newBefore = getSkillScore(mm); return { ...mm, skillScore: getSkillScore(mm) + delta }; }
+            if (mm.id === oldId) return { ...mm, skillScore: seedScore(mm) - delta };
+            if (mm.id === newId) { newBefore = seedScore(mm); return { ...mm, skillScore: seedScore(mm) + delta }; }
             return mm;
           }) });
         });
@@ -1025,7 +1048,7 @@ function App() {
           if (it.skillDeltas && it.skillDeltas[oldId]) {
             const sd = { ...it.skillDeltas };
             delete sd[oldId];
-            const base = newBefore != null ? newBefore : getSkillScore(newMember);
+            const base = newBefore != null ? newBefore : seedScore(newMember);
             sd[newId] = { before: base, after: base + delta };
             u.skillDeltas = sd;
           }
@@ -1055,7 +1078,7 @@ function App() {
           const list = (snap.data() || {}).members || [];
           tx.set(REFS.roster, { members: list.map((mm) => {
             const d = m.skillDeltas[mm.id];
-            return d ? { ...mm, skillScore: getSkillScore(mm) - (d.after - d.before) } : mm;
+            return d ? { ...mm, skillScore: seedScore(mm) - (d.after - d.before) } : mm;
           }) });
         });
       }
@@ -1657,10 +1680,10 @@ function App() {
 
   // 참석 인원에 맞춰 코트 수를 자동으로 맞춰요 (9명→2코트, 13명→3코트 …). 관리자가 직접 바꾼 적 없을 때만 작동해요.
   useEffect(() => {
-    if (!adminOn || meetingEndedToday || numCourtsManual) return;
+    if (!matchSettingsLoaded || !adminOn || meetingEndedToday || numCourtsManual) return;
     const recommended = Math.max(1, Math.floor(players.length / 4));
     if (recommended !== numCourts) persistMatchSettings({ numCourts: recommended });
-  }, [players.length, adminOn, meetingEndedToday, numCourtsManual]);
+  }, [players.length, adminOn, meetingEndedToday, numCourtsManual, matchSettingsLoaded]);
 
   const autoStartInFlight = useRef(false);
   useEffect(() => {
@@ -2145,18 +2168,18 @@ function App() {
         list.forEach((mm) => { byId[mm.id] = mm; });
         const teamAIds = m.teamA.map((p) => p.id);
         const teamBIds = m.teamB.map((p) => p.id);
-        const ratingA = teamAIds.reduce((sum, id) => sum + getSkillScore(byId[id]), 0) / teamAIds.length;
-        const ratingB = teamBIds.reduce((sum, id) => sum + getSkillScore(byId[id]), 0) / teamBIds.length;
+        const ratingA = teamAIds.reduce((sum, id) => sum + seedScore(byId[id]), 0) / teamAIds.length;
+        const ratingB = teamBIds.reduce((sum, id) => sum + seedScore(byId[id]), 0) / teamBIds.length;
         const { deltaA, deltaB } = computeEloDelta(ratingA, ratingB, aWin);
         deltas = {};
         [...teamAIds, ...teamBIds].forEach((id) => {
-          const before = getSkillScore(byId[id]);
+          const before = seedScore(byId[id]);
           const after = before + (teamAIds.includes(id) ? deltaA : deltaB);
           deltas[id] = { before: Math.round(before), after: Math.round(after) };
         });
         const next = list.map((mm) => {
-          if (teamAIds.includes(mm.id)) return { ...mm, skillScore: getSkillScore(mm) + deltaA };
-          if (teamBIds.includes(mm.id)) return { ...mm, skillScore: getSkillScore(mm) + deltaB };
+          if (teamAIds.includes(mm.id)) return { ...mm, skillScore: seedScore(mm) + deltaA };
+          if (teamBIds.includes(mm.id)) return { ...mm, skillScore: seedScore(mm) + deltaB };
           return mm;
         });
         tx.set(REFS.roster, { members: next });
@@ -3519,7 +3542,7 @@ function App() {
             const rate = s.games > 0 ? Math.round((s.wins / s.games) * 100) : 0;
             const allRecent = myRecentMatches(viewId, 999); // 판정 가능한 전체 경기 (점수 없이 승리팀만 고른 경기 포함)
             const myMember = roster.find((r) => r.id === viewId);
-            const mySkill = getSkillScore(myMember);
+            const mySkill = seedScore(myMember);
             const myTier = tierForScore(mySkill, s.games);
             const myStage = evaluationStage(s.games);
 
@@ -3896,9 +3919,9 @@ function App() {
 
             const ranked = withStats
               .filter((p) => p.stats.games >= RANKING_MIN_GAMES)
-              .filter((p) => tierFilter === "전체" || tierForScore(getSkillScore(p), p.stats.games) === tierFilter)
+              .filter((p) => tierFilter === "전체" || tierForScore(seedScore(p), p.stats.games) === tierFilter)
               .sort((a, b) => {
-                const sa = getSkillScore(a), sb = getSkillScore(b);
+                const sa = seedScore(a), sb = seedScore(b);
                 if (sb !== sa) return sb - sa; // 1순위: 실력점수
                 if (b.stats.games !== a.stats.games) return b.stats.games - a.stats.games; // 2순위: 경기 수
                 return lastMatchWon(b.id) - lastMatchWon(a.id); // 3순위: 최근 경기 결과
@@ -3946,7 +3969,7 @@ function App() {
                     const foundUnranked = !foundRanked && unranked.find((p) => (p.name || "").normalize("NFC").includes(q));
                     if (foundRanked) {
                       const idx = ranked.findIndex((p) => p.id === foundRanked.id);
-                      const skillScoreVal = getSkillScore(foundRanked);
+                      const skillScoreVal = seedScore(foundRanked);
                       const tier = tierForScore(skillScoreVal, foundRanked.stats.games);
                       const tc = tierColor(tier);
                       const rate = foundRanked.stats.games > 0 ? Math.round((foundRanked.stats.wins / foundRanked.stats.games) * 100) : 0;
@@ -4025,7 +4048,7 @@ function App() {
                     {top3.length > 0 && (
                       <div className="grid grid-cols-3 gap-2">
                         {top3.map((p, i) => {
-                          const skillScoreVal = getSkillScore(p);
+                          const skillScoreVal = seedScore(p);
                           const tier = tierForScore(skillScoreVal, p.stats.games);
                           const tc = tierColor(tier);
                           const isMe = p.id === myId;
@@ -4058,7 +4081,7 @@ function App() {
                       <ul className="space-y-2">
                         {rest.map((p, idx) => {
                           const i = idx + 3;
-                          const skillScoreVal = getSkillScore(p);
+                          const skillScoreVal = seedScore(p);
                           const tier = tierForScore(skillScoreVal, p.stats.games);
                           const tc = tierColor(tier);
                           const isMe = p.id === myId;
@@ -4094,7 +4117,7 @@ function App() {
                     {/* ④ 본인 순위 고정 표시 */}
                     {myRank >= 0 && myRank >= 3 && (() => {
                       const me2 = ranked[myRank];
-                      const skillScoreVal = getSkillScore(me2);
+                      const skillScoreVal = seedScore(me2);
                       const tier = tierForScore(skillScoreVal, me2.stats.games);
                       const rate = me2.stats.games > 0 ? Math.round((me2.stats.wins / me2.stats.games) * 100) : 0;
                       return (
