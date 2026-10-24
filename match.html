@@ -1862,18 +1862,26 @@ function App() {
     if (!(await appConfirm("미리 짠 대진표를 실제 경기 순서로 쓸까요?\n(코트가 비면 이 순서대로 시작하고, 점수를 입력할 수 있어요. 이미 예약된 다음 경기는 지워져요.)"))) return;
     const queue = [];
     previewData.forEach((r, i) => r.matches.forEach((mm) => queue.push({ id: uid(), round: i + 1, teamA: mm.teamA.map((p) => ({ id: p.id, name: p.name })), teamB: mm.teamB.map((p) => ({ id: p.id, name: p.name })) })));
+    // 이미 자동으로 시작된 경기가 있으면(점수·승패를 아직 안 넣은 경기만) 지우고 대진표 1라운드부터 시작할지 물어봐요.
+    const isUnscored = (m) => m && !m.done && m.date === todayStr() && !m.friendly && (m.scoreA === "" || m.scoreA == null) && (m.scoreB === "" || m.scoreB == null) && !m.winnerOverride;
+    const unscoredCount = Object.values(courtMatches).filter(isUnscored).length;
+    let replaceCurrent = false;
+    if (unscoredCount > 0) {
+      replaceCurrent = await appConfirm(`지금 코트에서 진행 중인 경기가 ${unscoredCount}개 있어요 (점수 입력 전).\n\n확인 = 이 경기들을 지우고 대진표 1라운드부터 바로 시작\n취소 = 지금 경기는 그대로 두고, 끝나는 코트부터 대진표 적용`);
+    }
     try {
       await db.runTransaction(async (tx) => {
         const cSnap = await tx.get(REFS.courtmatches);
         const current = (cSnap.data() || {}).data || {};
         const cleaned = {};
         Object.entries(current).forEach(([cn, m]) => {
+          if (replaceCurrent && isUnscored(m)) return; // 점수 입력 전 자동 경기는 비워요 → 빈 코트에 대진표가 시작돼요
           if (m && m.next) { const { next: _n, ...rest } = m; cleaned[cn] = rest; } else cleaned[cn] = m;
         });
         tx.set(REFS.courtmatches, { data: cleaned });
         tx.set(PLAN_REF, { date: todayStr(), queue });
       });
-      appAlert(`대진표 ${queue.length}경기를 등록했어요. 빈 코트부터 이 순서대로 시작해요.`);
+      appAlert(replaceCurrent ? `대진표 ${queue.length}경기를 등록했어요. 1라운드부터 바로 시작해요.` : `대진표 ${queue.length}경기를 등록했어요. 지금 경기가 끝나는 코트부터 이 순서대로 시작해요.`);
     } catch (e) {
       appAlert("대진표 등록에 실패했어요. 다시 시도해주세요.");
     }
