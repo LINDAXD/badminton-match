@@ -31,8 +31,12 @@ function fmtBirthday(b) {
 // 이기면 오르고 지면 내려가는데, 비슷한 상대한테 이기면 조금, 나보다 센 상대한테 이기면 더 많이 올라요.
 window.DEFAULT_SKILL_SCORE = 1000;
 
+// 처음 등록할 때 고른 실력(레벨)에 따른 시작 점수 — 경기를 치르면서 점수가 자동으로 조정돼요.
+window.LEVEL_START_SCORE = { "왕초보": 820, "초보": 920, "D조": 1000, "C조": 1100, "B조": 1200 };
 function getSkillScore(member) {
-  return (member && typeof member.skillScore === "number") ? member.skillScore : window.DEFAULT_SKILL_SCORE;
+  if (member && typeof member.skillScore === "number") return member.skillScore;
+  if (member && member.level && window.LEVEL_START_SCORE[member.level]) return window.LEVEL_START_SCORE[member.level];
+  return window.DEFAULT_SKILL_SCORE;
 }
 
 // 팀 평균 점수끼리 비교해서, 이긴 쪽/진 쪽 점수를 얼마나 올리고 내릴지 계산해요 (K=20 기준: 비슷한 상대 이기면 약 +10점).

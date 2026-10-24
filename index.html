@@ -512,7 +512,17 @@ function App() {
 
             if (checkinFlow.step === "pick") {
               const q = pickSearch.trim().normalize("NFC");
-              const filtered = q ? roster.filter((m) => (m.name || "").normalize("NFC").includes(q)) : roster;
+              const filtered = (q ? roster.filter((m) => (m.name || "").normalize("NFC").includes(q)) : [...roster])
+                .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko"));
+              const exactExists = roster.some((m) => (m.name || "").trim().normalize("NFC") === q);
+              function addNewMemberAndCheckin() {
+                const name = pickSearch.trim();
+                if (!name || exactExists) return;
+                const newMember = { id: uid(), name: name.normalize("NFC"), grade: "신입회원", joinedAt: todayStr(), birthday: "", level: signupLevel };
+                REFS.roster.set({ members: [...roster, newMember] }).catch(() => {});
+                pickMember(newMember);
+                setPickSearch("");
+              }
               return (
                 <>
                   <div className="flex items-center justify-between mb-3">
@@ -540,6 +550,23 @@ function App() {
                     {filtered.length === 0 && (
                       <p className="text-xs text-stone-400 py-2">일치하는 이름이 없어요.</p>
                     )}
+                  </div>
+                  <div className="mt-3 rounded-xl p-3 border" style={{ borderColor: "var(--bc-line)", backgroundColor: "#F7FAFF" }}>
+                    <p className="text-xs font-bold text-stone-700 mb-1">🌱 처음 오셨어요? 신규회원 추가</p>
+                    <p className="text-[11px] text-stone-400 mb-2">위 검색창에 이름을 입력하고, 실력을 고른 뒤 눌러주세요. 실력은 기존 회원과 매칭 밸런스를 맞추는 데 써요.</p>
+                    <div className="flex items-center gap-2">
+                      <select value={signupLevel} onChange={(e) => setSignupLevel(e.target.value)} className="text-xs border border-stone-200 rounded-lg px-2 py-2 bg-white">
+                        {window.LEVELS.map((lv) => (<option key={lv} value={lv}>{lv}</option>))}
+                      </select>
+                      <button
+                        onClick={addNewMemberAndCheckin}
+                        disabled={!pickSearch.trim() || exactExists}
+                        className="flex-1 rounded-lg py-2 text-sm font-bold text-white tap-scale disabled:opacity-40"
+                        style={{ backgroundColor: "var(--bc-blue)" }}
+                      >
+                        {pickSearch.trim() ? (exactExists ? "이미 있는 이름이에요" : `➕ "${pickSearch.trim()}" 추가하고 참석`) : "이름을 먼저 입력해주세요"}
+                      </button>
+                    </div>
                   </div>
                 </>
               );
