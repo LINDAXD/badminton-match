@@ -1147,6 +1147,64 @@ function App() {
     ROSTER_REF.set({ members: next }).catch(() => {});
   }
 
+  // 참석을 취소한 사람이 이미 코트(진행 중 경기/다음 경기 예약)에 들어가 있으면 빼줘요.
+  // - 다음 경기 예약에 있으면 그 예약을 지워요(자동으로 다시 짜져요).
+  // - 지금 경기에 있으면 대기 중인 사람 중 한 명으로 바꿔요. 바꿀 사람이 없으면 그대로 둬요(경기가 깨지지 않게).
+  async function purgeCancelledFromCourts(ids) {
+    const gone = new Set(ids);
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const current = (snap.data() || {}).data || {};
+        const next = { ...current };
+        let changed = false;
+        const busy = new Set();
+        Object.values(current).forEach((m) => {
+          if (m && !m.done && m.date === todayStr()) {
+            [...m.teamA, ...m.teamB].forEach((p) => busy.add(p.id));
+            if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => busy.add(p.id));
+          }
+        });
+        const spare = players.filter((p) => !gone.has(p.id) && !busy.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
+        Object.entries(current).forEach(([cn, m]) => {
+          if (!m || m.done || m.date !== todayStr()) return;
+          let mm = m;
+          if (mm.next && [...mm.next.teamA, ...mm.next.teamB].some((p) => gone.has(p.id))) {
+            const { next: _drop, ...rest } = mm;
+            mm = rest;
+          }
+          if ([...mm.teamA, ...mm.teamB].some((p) => gone.has(p.id)) && !mm.friendly) {
+            const sub = (team) => team.map((p) => {
+              if (!gone.has(p.id)) return p;
+              const r = spare.shift();
+              return r ? { id: r.id, name: r.name } : p;
+            });
+            mm = { ...mm, teamA: sub(mm.teamA), teamB: sub(mm.teamB) };
+          }
+          if (mm !== m) { next[cn] = mm; changed = true; }
+        });
+        if (changed) tx.set(REFS.courtmatches, { data: next });
+      });
+    } catch (e) {}
+  }
+  // 다른 기기/일정에서 참석을 취소한 경우에도 같은 처리를 해요
+  const purgeInFlight = useRef(false);
+  useEffect(() => {
+    if (!roster.length || purgeInFlight.current) return;
+    const attendeeIds = new Set(combinedTodayAttendees(schedule, checkinlog, roster).map((a) => a.id));
+    const inCourts = new Set();
+    Object.values(courtMatches).forEach((m) => {
+      if (m && !m.done && m.date === todayStr() && !m.friendly) {
+        [...m.teamA, ...m.teamB].forEach((p) => inCourts.add(p.id));
+        if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => inCourts.add(p.id));
+      }
+    });
+    const gone = [...inCourts].filter((id) => !String(id).startsWith("guest_") && !attendeeIds.has(id) && roster.some((r) => r.id === id));
+    if (!gone.length) return;
+    purgeInFlight.current = true;
+    purgeCancelledFromCourts(gone).finally(() => setTimeout(() => { purgeInFlight.current = false; }, 2000));
+  }, [schedule, checkinlog, roster, courtMatches]);
+
   function setMyRsvp(memberId, status) {
     try {
       const next = { ...rsvp, [memberId]: status };
@@ -1162,6 +1220,14 @@ function App() {
         try { logAttendance(memberId); } catch (e) { appAlert("출석 이력 기록 실패: " + (e && e.message ? e.message : e)); }
       } else if (status === "out") {
         setPlayers((p) => p.filter((x) => x.id !== memberId));
+        // 오늘 체크인 기록도 같이 지워요 — 안 지우면 일정에 모임이 없을 때 다시 참석자로 살아나요
+        db.runTransaction(async (tx) => {
+          const snap = await tx.get(REFS.checkinlog);
+          const items = (snap.data() || {}).items || [];
+          const filtered = items.filter((it) => !(it.memberId === memberId && it.date === todayStr()));
+          if (filtered.length !== items.length) tx.set(REFS.checkinlog, { items: filtered });
+        }).catch(() => {});
+        purgeCancelledFromCourts([memberId]);
       }
       // 관리자가 여기서 "고정 멤버"로 직접 체크해도, 더보기 → 일정의 오늘 모임에 정식으로 ✅참석한 것과 똑같이 처리돼요
       // (일정에도 그 사람 이름이 뜨고, 나중에 참석 기록/통계도 일정 RSVP 기준이랑 일치해요). 일정이 아직 없으면 그냥 건너뛰어요.
