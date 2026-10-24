@@ -96,8 +96,11 @@ function splitScore(four, ctx, excludeKey) {
     const skillA = skillOf ? (skillOf(a[0].id) + skillOf(a[1].id)) / 2 : 0;
     const skillB = skillOf ? (skillOf(b[0].id) + skillOf(b[1].id)) / 2 : 0;
     const skillGap = Math.abs(skillA - skillB);
-    const skillWeight = mode === "skill" ? 14 : mode === "social" ? 1 : 8;
-    const skillScore = skillGap * skillWeight;
+    const skillWeight = mode === "skill" ? 40 : mode === "social" ? 1 : 24;
+    let skillScore = skillGap * skillWeight;
+    // 두 팀 실력 차가 눈에 띄게 벌어지는 조합(예: 제일 잘하는 두 명이 한 팀)은 추가로 크게 감점해서, 다른 조합이 있으면 거의 안 뽑히게 해요.
+    // (같이 친 기록이 아주 많이 쌓여서 중복 감점이 더 커지는 경우가 아니면 이 규칙이 우선이에요.)
+    if (mode !== "social" && skillGap > 0.15) skillScore += (skillGap - 0.15) * 100;
 
     // 4) 균형 모드에서는 왕초보/초보끼리만 뭉치지 않도록, 팀 내부 실력차가 "적당히" 섞이는 조합을 살짝 선호
     let mixBonus = 0;
