@@ -955,6 +955,89 @@ function App() {
     }
   }
 
+  // 승패를 잘못 눌렀을 때 — 점수 없이도 "A팀 승 / B팀 승"만 바꿔서 고칠 수 있어요. 승패가 뒤집히면 실력점수 변동도 같이 뒤집어요.
+  async function editMatchWinner(m, side) {
+    if (!adminOn) return;
+    const oldWinner = matchWinnerSide(m);
+    if (oldWinner === side) return;
+    const flip = !!(oldWinner && m.skillDeltas);
+    try {
+      if (flip) {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(REFS.roster);
+          const list = (snap.data() || {}).members || [];
+          tx.set(REFS.roster, { members: list.map((mm) => {
+            const d = m.skillDeltas[mm.id];
+            return d ? { ...mm, skillScore: getSkillScore(mm) - (d.after - d.before) * 2 } : mm;
+          }) });
+        });
+      }
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.matchhistory);
+        const items = ((snap.data() || {}).items || []).map((it) => {
+          if (it.id !== m.id) return it;
+          const u = { ...it, winner: side };
+          const sA = Number(it.scoreA), sB = Number(it.scoreB);
+          const hasScore = it.scoreA !== "" && it.scoreB !== "" && !isNaN(sA) && !isNaN(sB) && sA !== sB;
+          if (hasScore && (sA > sB ? "A" : "B") !== side) { u.scoreA = ""; u.scoreB = ""; } // 점수와 승패가 서로 안 맞으면 점수는 비워요
+          if (flip && it.skillDeltas) {
+            const f = {};
+            Object.entries(it.skillDeltas).forEach(([id, d]) => { f[id] = { before: d.before, after: d.before - (d.after - d.before) }; });
+            u.skillDeltas = f;
+          }
+          return u;
+        });
+        tx.set(REFS.matchhistory, { items });
+      });
+    } catch (e) {
+      appAlert("승패 수정에 실패했어요. 다시 시도해주세요.");
+    }
+  }
+
+  // 사람을 잘못 넣었을 때 — 이미 끝난 경기 기록에서 선수 한 명을 다른 회원으로 바꿔요.
+  // 원래 선수에게 줬던 실력점수 변동은 되돌리고, 새 선수에게 같은 변동을 줘요 (승/패 횟수는 기록에서 자동으로 다시 계산돼요).
+  async function swapRecordPlayer(m, side, oldId, newId) {
+    if (!adminOn || oldId === newId) return;
+    const newMember = roster.find((r) => r.id === newId);
+    if (!newMember) return;
+    const teamKey = side === "A" ? "teamA" : "teamB";
+    if ([...(m.teamA || []), ...(m.teamB || [])].some((p) => p.id === newId)) { appAlert("이미 이 경기에 들어가 있는 사람이에요."); return; }
+    try {
+      const d = m.skillDeltas && m.skillDeltas[oldId];
+      const delta = d ? d.after - d.before : 0;
+      let newBefore = null;
+      if (d) {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(REFS.roster);
+          const list = (snap.data() || {}).members || [];
+          tx.set(REFS.roster, { members: list.map((mm) => {
+            if (mm.id === oldId) return { ...mm, skillScore: getSkillScore(mm) - delta };
+            if (mm.id === newId) { newBefore = getSkillScore(mm); return { ...mm, skillScore: getSkillScore(mm) + delta }; }
+            return mm;
+          }) });
+        });
+      }
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.matchhistory);
+        const items = ((snap.data() || {}).items || []).map((it) => {
+          if (it.id !== m.id) return it;
+          const u = { ...it, [teamKey]: (it[teamKey] || []).map((p) => (p.id === oldId ? { id: newMember.id, name: newMember.name } : p)) };
+          if (it.skillDeltas && it.skillDeltas[oldId]) {
+            const sd = { ...it.skillDeltas };
+            delete sd[oldId];
+            const base = newBefore != null ? newBefore : getSkillScore(newMember);
+            sd[newId] = { before: base, after: base + delta };
+            u.skillDeltas = sd;
+          }
+          return u;
+        });
+        tx.set(REFS.matchhistory, { items });
+      });
+    } catch (e) {
+      appAlert("선수 변경에 실패했어요. 다시 시도해주세요.");
+    }
+  }
+
   async function deleteMatchRecord(m) {
     if (!adminOn) return;
     if (!(await appConfirm(`${m.date} · Court ${m.court} 경기 기록을 삭제할까요? 되돌릴 수 없어요.`))) return;
@@ -965,6 +1048,17 @@ function App() {
         const items = (data.items || []).filter((it) => it.id !== m.id);
         tx.set(REFS.matchhistory, { items });
       });
+      // 지워진 경기 때 반영됐던 실력점수 변동도 되돌려요
+      if (m.skillDeltas) {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(REFS.roster);
+          const list = (snap.data() || {}).members || [];
+          tx.set(REFS.roster, { members: list.map((mm) => {
+            const d = m.skillDeltas[mm.id];
+            return d ? { ...mm, skillScore: getSkillScore(mm) - (d.after - d.before) } : mm;
+          }) });
+        });
+      }
     } catch (e) {
       appAlert("삭제에 실패했어요. 다시 시도해주세요.");
     }
@@ -3745,14 +3839,30 @@ function App() {
                       <NumberSelect value={m.scoreB === "" ? null : Number(m.scoreB)} onChange={(v) => editMatchRecord(m, "scoreB", v == null ? "" : String(v))} max={30} placeholder="-" unit="" />
                     </div>
                   )}
+                  {adminOn && (
+                    <div className="flex gap-2 mb-3">
+                      <button onClick={() => editMatchWinner(m, "A")} className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border ${side === "A" ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`} style={side === "A" ? { backgroundColor: "var(--bc-blue)" } : {}}>🏆 A팀 승</button>
+                      <button onClick={() => editMatchWinner(m, "B")} className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border ${side === "B" ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`} style={side === "B" ? { backgroundColor: "var(--bc-blue)" } : {}}>🏆 B팀 승</button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     <div className={`bc-team-a rounded-xl p-3 ${side === "A" ? "ring-2 ring-offset-1" : ""}`} style={side === "A" ? { "--tw-ring-color": "var(--bc-blue)" } : {}}>
                       <p className="bc-team-label-a text-[10px] font-bold tracking-widest mb-1.5 flex items-center gap-1">A팀 {side === "A" && "🏆"}</p>
-                      {(m.teamA || []).map((p) => <p key={p.id} className="text-sm font-semibold leading-tight">{p.name}</p>)}
+                      {(m.teamA || []).map((p) => adminOn ? (
+                        <select key={p.id} value={p.id} onChange={(e) => swapRecordPlayer(m, "A", p.id, e.target.value)} className="block w-full text-sm font-semibold leading-tight bg-transparent py-0.5">
+                          <option value={p.id}>{p.name}</option>
+                          {[...roster].filter((r) => r.id !== p.id).sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko")).map((r) => <option key={r.id} value={r.id}>→ {r.name}</option>)}
+                        </select>
+                      ) : <p key={p.id} className="text-sm font-semibold leading-tight">{p.name}</p>)}
                     </div>
                     <div className={`bc-team-b rounded-xl p-3 ${side === "B" ? "ring-2 ring-offset-1" : ""}`} style={side === "B" ? { "--tw-ring-color": "var(--bc-blue)" } : {}}>
                       <p className="bc-team-label-b text-[10px] font-bold tracking-widest mb-1.5 flex items-center gap-1">B팀 {side === "B" && "🏆"}</p>
-                      {(m.teamB || []).map((p) => <p key={p.id} className="text-sm font-semibold leading-tight">{p.name}</p>)}
+                      {(m.teamB || []).map((p) => adminOn ? (
+                        <select key={p.id} value={p.id} onChange={(e) => swapRecordPlayer(m, "B", p.id, e.target.value)} className="block w-full text-sm font-semibold leading-tight bg-transparent py-0.5">
+                          <option value={p.id}>{p.name}</option>
+                          {[...roster].filter((r) => r.id !== p.id).sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko")).map((r) => <option key={r.id} value={r.id}>→ {r.name}</option>)}
+                        </select>
+                      ) : <p key={p.id} className="text-sm font-semibold leading-tight">{p.name}</p>)}
                     </div>
                   </div>
                 </div>
