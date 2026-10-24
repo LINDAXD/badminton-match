@@ -484,7 +484,7 @@ function App() {
               return (
                 <>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-[11px] font-semibold text-stone-400 tracking-wide">🏸 오늘의 모임</p>
+                    <p className="text-[11px] font-semibold text-stone-400 tracking-wide">{s && s.date !== todayStr() ? (() => { const d = Math.round((new Date(s.date + "T00:00:00") - new Date(todayStr() + "T00:00:00")) / 86400000); return d === 1 ? "🏸 내일의 모임" : `🏸 다가오는 모임 · D-${d}`; })() : "🏸 오늘의 모임"}</p>
                     <p className="text-[11px] font-bold" style={{ color: "var(--bc-blue)" }}>🏸 현재 콕 {submittedCockTotal}개</p>
                   </div>
                   <p className="headfont text-2xl text-stone-900">{s ? s.title : "오늘의 모임"}</p>
