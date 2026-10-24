@@ -23,8 +23,6 @@ window.authReadyPromise = new Promise((resolve) => { _resolveAuthReady = resolve
 firebase.auth().onAuthStateChanged((user) => {
   if (user) _resolveAuthReady();
 });
-// 네트워크가 느리거나 인증이 응답이 없어도 화면이 영원히 "불러오는 중"에 멈추지 않게, 6초 뒤엔 일단 화면을 띄워요.
-setTimeout(() => _resolveAuthReady(), 6000);
 firebase.auth().signInAnonymously().catch((err) => {
   console.error("익명 로그인 실패:", err);
   _resolveAuthReady(); // 인증이 실패해도 화면이 무한정 멈춰있지 않도록
