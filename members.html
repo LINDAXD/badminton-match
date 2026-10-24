@@ -29,6 +29,7 @@ function App() {
   const [matchhistory, setMatchhistory] = React.useState([]);
   const [dailyvotes, setDailyvotes] = React.useState({});
   const [noshows, setNoshows] = React.useState([]);
+  const [lates, setLates] = React.useState([]);
 
   React.useEffect(() => {
     const unsub = REFS.noshows.onSnapshot((snap) => {
@@ -38,10 +39,24 @@ function App() {
     return () => unsub();
   }, []);
 
+  React.useEffect(() => {
+    const unsub = REFS.lates.onSnapshot((snap) => {
+      const data = snap.data();
+      setLates(data && data.items ? data.items : []);
+    }, () => {});
+    return () => unsub();
+  }, []);
+
   async function giveNoShow(member) {
     if (!(await appConfirm(`"${member.name}"님에게 노쇼 1회를 부여할까요?`))) return;
     const item = { id: uid(), memberId: member.id, date: todayStr(), source: "admin" };
     REFS.noshows.set({ items: [...noshows, item] }).catch(() => {});
+  }
+
+  async function giveLate(member) {
+    if (!(await appConfirm(`"${member.name}"님에게 지각 1회를 부여할까요?`))) return;
+    const item = { id: uid(), memberId: member.id, date: todayStr(), source: "admin" };
+    REFS.lates.set({ items: [...lates, item] }).catch(() => {});
   }
 
   React.useEffect(() => {
@@ -68,6 +83,28 @@ function App() {
     return () => unsub();
   }, []);
   const [profileMember, setProfileMember] = React.useState(null);
+  const { myId } = useIdentity();
+
+  // 마이 화면 "프로필 수정"에서 넘어오면 내 프로필 수정 모달을 바로 열어줘요.
+  React.useEffect(() => {
+    if (!myId || !roster.length) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("edit") === "me") {
+      const me = roster.find((r) => r.id === myId);
+      if (me) setProfileMember(me);
+    }
+  }, [myId, roster]);
+
+  // 랭킹 탭 검색 결과 등, 다른 화면에서 특정 회원 프로필로 바로 넘어올 때 써요 (?view=회원ID).
+  React.useEffect(() => {
+    if (!roster.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const viewId = params.get("view");
+    if (viewId) {
+      const target = roster.find((r) => r.id === viewId);
+      if (target) setProfileMember(target);
+    }
+  }, [roster]);
 
   React.useEffect(() => {
     const unsub = REFS.checkinlog.onSnapshot((snap) => {
@@ -90,8 +127,8 @@ function App() {
     persist(next);
     setProfileMember((prev) => (prev ? { ...prev, ...fields } : prev));
   }
-  const { myId } = useIdentity();
   const { adminOn, tryUnlock, lock } = useAdmin(isOfficerOf(roster, myId));
+  const allSessionDates = checkinlog.map((c) => c.date); // 최근 출석일/출석 횟수 계산용 (전체 모임 개최일 목록)
   const [search, setSearch] = React.useState("");
   const [socialFilter, setSocialFilter] = React.useState([]);
 
@@ -100,7 +137,6 @@ function App() {
   }
   const [bulkText, setBulkText] = React.useState("");
   const [addMsg, setAddMsg] = React.useState("");
-  const [bulkLevel, setBulkLevel] = React.useState("초보");
   const [pending, setPending] = React.useState([]);
 
   React.useEffect(() => {
@@ -143,7 +179,7 @@ function App() {
       return;
     }
     const added = uniqueNew.map((name) => ({
-      id: uid(), name, grade: "신입회원", joinedAt: todayStr(), birthday: "", level: bulkLevel,
+      id: uid(), name, grade: "신입회원", joinedAt: todayStr(), birthday: "",
     }));
     persist([...roster, ...added]);
     setAddMsg(`${added.length}명이 새로 등록됐어요! 🌱`);
@@ -173,8 +209,7 @@ function App() {
     persist(roster.filter((m) => m.id !== id));
   }
 
-  const filtered = [...roster]
-    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko"))
+  const filtered = roster
     .filter((m) => m.name.toLowerCase().includes(search.trim().toLowerCase()))
     .filter((m) => socialFilter.every((key) => m.social && m.social[key]));
   const grouped = window.GRADES.map((g) => ({
@@ -183,9 +218,17 @@ function App() {
   }));
 
   return (
-    <RequireLogin myId={myId}>
     <div className="min-h-screen bg-white text-stone-800 font-sans pb-24">
       <TopHeader title="👥 회원 관리" subtitle="버디 멤버 명단을 확인하고 관리해요" />
+
+      {myId && (
+        <section className="px-5 max-w-2xl mx-auto mb-2">
+          <a href="./more.html" className="tap-scale bc-card px-4 py-3 flex items-center justify-between">
+            <span className="text-sm font-semibold text-stone-700">🙋 내 정보 · 배지 · 설정</span>
+            <span className="text-stone-300">›</span>
+          </a>
+        </section>
+      )}
 
       <section className="px-5 max-w-2xl mx-auto mb-4">
         <div className="flex items-center gap-2">
@@ -198,7 +241,7 @@ function App() {
           <button
             onClick={adminOn ? lock : () => tryUnlock()}
             className={`text-[11px] px-3 py-2.5 rounded-xl border whitespace-nowrap ${adminOn ? "text-white border-transparent" : "text-stone-400 border-stone-200"}`}
-            style={adminOn ? { backgroundColor: "#4CAF50" } : {}}
+            style={adminOn ? { backgroundColor: "var(--bc-blue)" } : {}}
           >
             {adminOn ? "🔓 관리자" : "🔒 관리자"}
           </button>
@@ -211,7 +254,7 @@ function App() {
                 key={t.key}
                 onClick={() => toggleSocialFilter(t.key)}
                 className={`text-[11px] px-2.5 py-1.5 rounded-full border tap-scale ${active ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                style={active ? { backgroundColor: "#4CAF50" } : {}}
+                style={active ? { backgroundColor: "var(--bc-blue)" } : {}}
               >
                 {t.emoji} {t.label}
               </button>
@@ -224,7 +267,7 @@ function App() {
         <section className="px-5 max-w-2xl mx-auto mb-5">
           <div className="bc-card p-4" style={{ borderColor: "#FFD54F", borderWidth: "1.5px" }}>
             <p className="text-sm font-bold text-stone-800 mb-1">🙋 가입 승인 대기 ({pending.length}명)</p>
-            <p className="text-xs text-stone-400 mb-3">새로 이름을 입력한 사람들이에요. 승인해야 그 이름+비밀번호로 로그인할 수 있어요.</p>
+            <p className="text-xs text-stone-400 mb-3">새로 이름을 입력한 사람들이에요. 승인하면 그 이름으로 바로 참여할 수 있어요.</p>
             <ul className="space-y-2">
               {pending.map((req) => (
                 <li key={req.id} className="flex items-center justify-between bg-stone-50 rounded-2xl px-3 py-2.5">
@@ -233,7 +276,7 @@ function App() {
                     <p className="text-[11px] text-stone-400">{req.requestedAt} 신청{req.level ? ` · 희망 레벨 ${req.level}` : ""}</p>
                   </div>
                   <div className="flex gap-1.5">
-                    <button onClick={() => approveRequest(req)} className="text-[11px] font-semibold text-white px-3 py-1.5 rounded-full" style={{ backgroundColor: "#4CAF50" }}>
+                    <button onClick={() => approveRequest(req)} className="text-[11px] font-semibold px-3 py-1.5 rounded-full" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
                       승인
                     </button>
                     <button onClick={() => rejectRequest(req)} className="text-[11px] font-semibold text-stone-400 bg-stone-100 px-3 py-1.5 rounded-full">
@@ -267,13 +310,29 @@ function App() {
                   <li key={m.id} className="rise-in bc-card px-4 py-3.5">
                     <div className="flex items-center justify-between">
                       <button onClick={() => setProfileMember(m)} className="text-left tap-scale flex items-center gap-2.5">
-                        <Avatar name={m.name} photoUrl={m.photoUrl} size={36} />
                         <div>
                           <p className="text-sm font-semibold text-stone-800 underline decoration-dotted underline-offset-4">{m.name}</p>
                           <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                             <GradeBadge grade={m.grade} />
                             {m.level && <MiniTag>{m.level}</MiniTag>}
                           </div>
+                          {(() => {
+                            const st = computeAttendanceStats(m.id, checkinlog, allSessionDates);
+                            const noShowCt = computeNoShowCount(m.id, scheduleItems, checkinlog, noshows);
+                            const lateCt = computeLateCount(m.id, lates);
+                            if (st.totalCount === 0) return <p className="text-[11px] text-stone-300 mt-1">아직 출석 기록 없음</p>;
+                            return (
+                              <p className="text-[11px] text-stone-400 mt-1">
+                                최근 {fmtDate(st.lastDate)} · 총 {st.totalCount}회
+                                {(noShowCt > 0 || lateCt > 0) && (
+                                  <span className="ml-1" style={{ color: "#DC7A2E" }}>
+                                    {noShowCt > 0 && ` · 🚫노쇼 ${noShowCt}`}
+                                    {lateCt > 0 && ` · 🕒지각 ${lateCt}`}
+                                  </span>
+                                )}
+                              </p>
+                            );
+                          })()}
                         </div>
                       </button>{adminOn && (
                         <div className="flex items-center gap-3">
@@ -343,21 +402,14 @@ function App() {
             placeholder={"감자\n포도\n사과"}
             className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm h-24 focus:outline-none focus:ring-2 focus:ring-green-500"
           />
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-[11px] text-stone-400 shrink-0">이 사람들 실력</span>
-            <select value={bulkLevel} onChange={(e) => setBulkLevel(e.target.value)} className="text-xs border border-stone-200 rounded-lg px-2 py-1.5">
-              {window.LEVELS.map((lv) => (<option key={lv} value={lv}>{lv}</option>))}
-            </select>
-            <span className="text-[10px] text-stone-300">실력이 다르면 나눠서 따로 추가해요</span>
-          </div>
           <button
             onClick={addMembers}
             className="mt-2 w-full text-white rounded-lg py-2.5 text-sm font-semibold tap-scale"
-            style={{ backgroundColor: "#4CAF50" }}
+            style={{ backgroundColor: "var(--bc-blue)" }}
           >
             등록하기
           </button>
-          {addMsg && <p className="text-xs mt-1.5" style={{ color: "#4CAF50" }}>{addMsg}</p>}
+          {addMsg && <p className="text-xs mt-1.5" style={{ color: "var(--bc-blue)" }}>{addMsg}</p>}
         </div>
       </section>
       )}
@@ -375,8 +427,10 @@ function App() {
           matchhistory={matchhistory}
           dailyvotes={dailyvotes}
           noshows={noshows}
+          lates={lates}
           onGiveNoShow={giveNoShow}
-          canEdit={adminOn || profileMember.id === myId}
+          onGiveLate={giveLate}
+          canEdit={true}
           isAdmin={adminOn}
           isSelf={profileMember.id === myId}
           onSave={saveProfileFields}
@@ -384,12 +438,11 @@ function App() {
         />
       )}
     </div>
-    </RequireLogin>
   );
 }
 
 window.authReadyPromise.then(() => {
-  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
 });
 </script>
 </body>
