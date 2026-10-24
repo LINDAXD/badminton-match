@@ -3211,6 +3211,13 @@ function App() {
             {previewData && (
               <div className="mt-3 space-y-2">
                 {previewData.length === 0 && <p className="text-xs text-stone-400">참석자가 4명 이상이어야 짤 수 있어요.</p>}
+                {previewData.length > 0 && (adminOn ? (
+                  <button onClick={applyPreviewAsPlan} className="w-full rounded-lg py-3 text-sm font-bold text-white tap-scale" style={{ backgroundColor: "#16A34A" }}>
+                    📌 이 대진으로 진행하기 (점수 입력 가능)
+                  </button>
+                ) : (
+                  <p className="text-xs rounded-lg p-2.5" style={{ backgroundColor: "#FFF8E1", color: "#B98900" }}>🔒 이 대진으로 실제 진행하려면 위쪽 "🔒 관리자"를 눌러 관리자 모드로 들어와주세요.</p>
+                ))}
                 {previewData.map((r, i) => (
                   <div key={i} className="rounded-xl border p-3" style={{ borderColor: "var(--bc-line)" }}>
                     <p className="text-[11px] font-bold mb-1" style={{ color: "var(--bc-blue)" }}>{i + 1}라운드</p>
@@ -3222,11 +3229,6 @@ function App() {
                     {r.resting.length > 0 && <p className="text-[11px] text-stone-400 mt-1">😴 쉬는 사람: {r.resting.map((p) => p.name).join(", ")}</p>}
                   </div>
                 ))}
-                {previewData.length > 0 && adminOn && (
-                  <button onClick={applyPreviewAsPlan} className="w-full rounded-lg py-2.5 text-sm font-bold text-white tap-scale" style={{ backgroundColor: "#16A34A" }}>
-                    📌 이 대진으로 진행하기 (점수 입력 가능)
-                  </button>
-                )}
                 {previewData.length > 0 && <p className="text-[10px] text-stone-400">※ "진행하기"를 누르면 이 순서대로 실제 경기가 시작돼요. 안 누르면 미리보기일 뿐이에요.</p>}
               </div>
             )}
