@@ -695,20 +695,26 @@ function App() {
   }, []);
 
   // 매칭 모드 / 제외 회원 / 대기시작시각 / 코트 잠금 / 실력전 순위블록 오프셋을 한 문서에 같이 저장해요
+  // ⚠️ 설정 전체를 한 문서에 통째로 저장하기 때문에, 오래된(낡은) 화면 값으로 저장하면 방금 바꾼 코트 수 같은 게 도로 덮어써져요.
+  // (자동 매칭처럼 시간이 걸리는 작업이 끝나고 나서 저장할 때 특히 그랬어요.) 그래서 항상 "가장 최신 값"을 담은 ref에서 읽어요.
+  const settingsRef = useRef({});
+  settingsRef.current = { mode: matchMode, excluded, benched, lockedCourts, skillRankOffset, numCourts, numCourtsManual, meetingEndedDate, autoStart, autoFinishDelaySec, friendlyCourts };
   function persistMatchSettings(patch) {
+    const cur = settingsRef.current;
     const next = {
-      mode: patch.mode !== undefined ? patch.mode : matchMode,
-      excluded: patch.excluded !== undefined ? patch.excluded : excluded,
-      benched: patch.benched !== undefined ? patch.benched : benched,
-      lockedCourts: patch.lockedCourts !== undefined ? patch.lockedCourts : lockedCourts,
-      skillRankOffset: patch.skillRankOffset !== undefined ? patch.skillRankOffset : skillRankOffset,
-      numCourts: patch.numCourts !== undefined ? patch.numCourts : numCourts,
-      numCourtsManual: patch.numCourtsManual !== undefined ? patch.numCourtsManual : numCourtsManual,
-      meetingEndedDate: patch.meetingEndedDate !== undefined ? patch.meetingEndedDate : meetingEndedDate,
-      autoStart: patch.autoStart !== undefined ? patch.autoStart : autoStart,
-      autoFinishDelaySec: patch.autoFinishDelaySec !== undefined ? patch.autoFinishDelaySec : autoFinishDelaySec,
-      friendlyCourts: patch.friendlyCourts !== undefined ? patch.friendlyCourts : friendlyCourts,
+      mode: patch.mode !== undefined ? patch.mode : cur.mode,
+      excluded: patch.excluded !== undefined ? patch.excluded : cur.excluded,
+      benched: patch.benched !== undefined ? patch.benched : cur.benched,
+      lockedCourts: patch.lockedCourts !== undefined ? patch.lockedCourts : cur.lockedCourts,
+      skillRankOffset: patch.skillRankOffset !== undefined ? patch.skillRankOffset : cur.skillRankOffset,
+      numCourts: patch.numCourts !== undefined ? patch.numCourts : cur.numCourts,
+      numCourtsManual: patch.numCourtsManual !== undefined ? patch.numCourtsManual : cur.numCourtsManual,
+      meetingEndedDate: patch.meetingEndedDate !== undefined ? patch.meetingEndedDate : cur.meetingEndedDate,
+      autoStart: patch.autoStart !== undefined ? patch.autoStart : cur.autoStart,
+      autoFinishDelaySec: patch.autoFinishDelaySec !== undefined ? patch.autoFinishDelaySec : cur.autoFinishDelaySec,
+      friendlyCourts: patch.friendlyCourts !== undefined ? patch.friendlyCourts : cur.friendlyCourts,
     };
+    settingsRef.current = next;
     setMatchMode(next.mode);
     setExcluded(next.excluded);
     setBenched(next.benched);
@@ -1165,7 +1171,19 @@ function App() {
             if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => busy.add(p.id));
           }
         });
-        const spare = players.filter((p) => !gone.has(p.id) && !busy.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
+        // 지금 경기에서 뛰는 사람만 "바쁜 사람"으로 봐요. 다음 경기 예약에만 들어가 있는 사람은 빼서 쓰고, 그 예약은 지워요(자동으로 다시 짜져요).
+        const playingNow = new Set();
+        const inSomeNext = new Set();
+        Object.values(current).forEach((m) => {
+          if (m && !m.done && m.date === todayStr()) {
+            [...m.teamA, ...m.teamB].forEach((p) => playingNow.add(p.id));
+            if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => inSomeNext.add(p.id));
+          }
+        });
+        const spare = players
+          .filter((p) => !gone.has(p.id) && !playingNow.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id))
+          .sort((a, b) => (inSomeNext.has(a.id) ? 1 : 0) - (inSomeNext.has(b.id) ? 1 : 0));
+        const usedReplacements = new Set();
         Object.entries(current).forEach(([cn, m]) => {
           if (!m || m.done || m.date !== todayStr()) return;
           let mm = m;
@@ -1177,11 +1195,20 @@ function App() {
             const sub = (team) => team.map((p) => {
               if (!gone.has(p.id)) return p;
               const r = spare.shift();
+              if (r) usedReplacements.add(r.id);
               return r ? { id: r.id, name: r.name } : p;
             });
             mm = { ...mm, teamA: sub(mm.teamA), teamB: sub(mm.teamB) };
           }
           if (mm !== m) { next[cn] = mm; changed = true; }
+        });
+        // 대신 들어간 사람이 다른 코트의 다음 경기 예약에도 있었다면, 겹치지 않게 그 예약은 지워요
+        Object.entries(next).forEach(([cn, m]) => {
+          if (m && m.next && [...m.next.teamA, ...m.next.teamB].some((p) => usedReplacements.has(p.id))) {
+            const { next: _d, ...rest } = m;
+            next[cn] = rest;
+            changed = true;
+          }
         });
         if (changed) tx.set(REFS.courtmatches, { data: next });
       });
