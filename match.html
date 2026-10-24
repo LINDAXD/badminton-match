@@ -1555,8 +1555,18 @@ function App() {
   // 쉬고 싶어요(restWish)를 누른 사람은 실제 매칭 후보(waitingPlayers)에서는 빠지지만,
   // 그렇다고 완전히 사라지면 참석 인원이랑 숫자가 안 맞아 보이니, 여기서는 "대기 중"으로 계속 세어줘요.
   // (먼저 간 사람/매칭 제외된 사람은 여기서도 제외 — 진짜로 오늘 안 뛰니까요.)
+  // 지금 코트에서 실제로 뛰고 있는 사람 / 다음 경기로 예약만 된 사람을 따로 세요 (예약된 사람까지 "게임 중"으로 세면 코트 수보다 많아 보여요)
+  const playingNowIds = new Set();
+  const reservedNextIds = new Set();
+  Object.values(courtMatches).forEach((m) => {
+    if (m && !m.done && m.date === todayStr()) {
+      [...m.teamA, ...m.teamB].forEach((p) => playingNowIds.add(p.id));
+      if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => { if (!playingNowIds.has(p.id)) reservedNextIds.add(p.id); });
+    }
+  });
+  reservedNextIds.forEach((id) => { if (playingNowIds.has(id)) reservedNextIds.delete(id); });
   const displayWaitingCount = players.filter(
-    (p) => !occupiedIds.has(p.id) && !leftEarly[p.id] && !excluded.includes(p.id)
+    (p) => !playingNowIds.has(p.id) && !leftEarly[p.id] && !excluded.includes(p.id)
   ).length;
 
   // "직접 4명 선택"할 때는 "쉬고 싶어요"/제외 표시와 상관없이, 지금 다른 경기 중이 아닌
@@ -2880,7 +2890,7 @@ function App() {
           {/* 오늘 운영 현황 — 매칭 화면 켜자마자 1초 만에 상황 파악 */}
           <div className="bc-card px-4 py-3">
             <p className="text-sm font-semibold text-stone-700">
-              🏸 {activePlayers.length}명 참석 · <span style={{ color: "var(--bc-blue)" }}>{occupiedIds.size}명 경기 중</span> · {displayWaitingCount}명 대기
+              🏸 {activePlayers.length}명 참석 · <span style={{ color: "var(--bc-blue)" }}>{playingNowIds.size}명 경기 중</span> · {displayWaitingCount}명 대기
             </p>
             {waitingPlayers.length > 0 && (
               <p className="text-xs text-stone-400 mt-1">
@@ -2979,7 +2989,7 @@ function App() {
                   <div className="px-4 pt-2 pb-4">
                     <p className="text-xs text-stone-400 mb-3">참석 {activePlayers.length}명 · 코트 {numCourts}개</p>
                     <div className="flex gap-2 mb-3">
-                      <span className="bc-badge2 bc-badge2-playing">🟢 게임 중 {occupiedIds.size}명</span>
+                      <span className="bc-badge2 bc-badge2-playing">🟢 게임 중 {playingNowIds.size}명</span>
                       <span className="bc-badge2 bc-badge2-waiting">🟡 대기 {readyCount}명</span>
                     </div>
                     <button
@@ -3098,10 +3108,10 @@ function App() {
             <div className="grid grid-cols-2 gap-2 mb-3">
               <div className="rounded-xl p-2.5" style={{ backgroundColor: "var(--bc-blue-soft)" }}>
                 <p className="text-[11px] text-stone-500">🟢 게임 중</p>
-                <p className="headfont text-xl" style={{ color: "var(--bc-navy)" }}>{occupiedIds.size}<span className="text-xs font-normal">명</span></p>
+                <p className="headfont text-xl" style={{ color: "var(--bc-navy)" }}>{playingNowIds.size}<span className="text-xs font-normal">명</span></p>
               </div>
               <div className="rounded-xl p-2.5" style={{ backgroundColor: "var(--bc-orange-soft)" }}>
-                <p className="text-[11px] text-stone-500">🟡 대기 중</p>
+                <p className="text-[11px] text-stone-500">🟡 대기 중{reservedNextIds.size > 0 ? ` (다음 경기 예약 ${reservedNextIds.size}명 포함)` : ""}</p>
                 <p className="headfont text-xl" style={{ color: "var(--bc-orange)" }}>{displayWaitingCount}<span className="text-xs font-normal">명</span></p>
               </div>
             </div>
@@ -3111,8 +3121,9 @@ function App() {
                 <p className="headfont text-2xl text-stone-800">{activePlayers.length}<span className="text-sm font-normal">명</span></p>
               </div>
               <div>
-                <p className="text-[11px] text-stone-400">추천 코트 수</p>
+                <p className="text-[11px] text-stone-400">추천 코트 수 <span className="text-stone-300">(참고용)</span></p>
                 <p className="headfont text-2xl text-stone-800">{Math.max(1, Math.floor(activePlayers.length / 4)) || 0}<span className="text-sm font-normal">면</span></p>
+                <p className="text-[11px] font-semibold" style={{ color: "var(--bc-blue)" }}>지금 {numCourts}면 사용 중</p>
               </div>
               <div className="col-span-2">
                 <p className="text-[11px] text-stone-400">다음 추천</p>
