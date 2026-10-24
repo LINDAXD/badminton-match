@@ -6,7 +6,8 @@ function uid() {
   return Math.random().toString(36).slice(2, 9);
 }
 
-function todayStr() {
+// 진짜 오늘 날짜 (기기 시간 기준)
+function realTodayStr() {
   // 주의: toISOString()은 UTC 기준이라 한국 시간 자정~오전 9시 사이엔 날짜가 하루 밀려서 나오는 버그가 있었어요.
   // 그래서 로컬(내 폰) 시간 기준으로 직접 조립해요.
   const d = new Date();
@@ -14,6 +15,65 @@ function todayStr() {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+// 앱 전체가 "오늘"로 취급하는 날짜 — 관리자가 날짜를 바꿔두면(예: 내일 매칭을 미리 짤 때) 모든 화면이 그 날짜 기준으로 바뀌어요.
+// 이 기기에서만 적용되고, 실제 날짜가 그 날짜에 도달하면 자동으로 해제돼요.
+function todayStr() {
+  const real = realTodayStr();
+  try {
+    const o = localStorage.getItem("bm_dateOverride");
+    if (o && /^\d{4}-\d{2}-\d{2}$/.test(o) && o > real) return o;
+  } catch (e) {}
+  return real;
+}
+
+// 날짜 바꾸기 버튼 — 홈/매칭 화면 위쪽에 둬요
+function DateSwitcher() {
+  const [open, setOpen] = useState(false);
+  const real = realTodayStr();
+  const cur = todayStr();
+  const changed = cur !== real;
+  const [val, setVal] = useState(cur);
+  function apply(v) {
+    try {
+      if (!v || v <= real) localStorage.removeItem("bm_dateOverride");
+      else localStorage.setItem("bm_dateOverride", v);
+    } catch (e) {}
+    window.location.reload();
+  }
+  function plusDays(n) {
+    const d = new Date(real + "T00:00:00");
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  const label = `${Number(cur.slice(5, 7))}/${Number(cur.slice(8, 10))}`;
+  return (
+    <>
+      <button
+        onClick={() => { setVal(cur); setOpen(true); }}
+        className={`text-[11px] px-3 py-1.5 rounded-full border shrink-0 ${changed ? "text-white border-transparent" : "text-stone-500 border-stone-200 bg-white"}`}
+        style={changed ? { backgroundColor: "#F59E0B" } : {}}
+      >
+        📅 {changed ? `${label} 기준` : `오늘 ${label}`}
+      </button>
+      {open && (
+        <div className="fixed inset-0 bg-black/50 z-[95] flex items-center justify-center px-6" onClick={() => setOpen(false)}>
+          <div className="bg-white rounded-2xl p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm font-bold text-stone-800 mb-1">📅 어느 날짜 기준으로 볼까요?</p>
+            <p className="text-xs text-stone-400 mb-3">내일 모임 매칭을 미리 짤 때 날짜를 바꾸면, 홈·매칭·참석자가 전부 그 날짜 기준으로 바뀌어요. (이 기기에서만 적용돼요)</p>
+            <div className="flex gap-2 mb-3">
+              <button onClick={() => apply(real)} className="flex-1 rounded-lg py-2 text-xs font-semibold border border-stone-200 text-stone-600">오늘</button>
+              <button onClick={() => apply(plusDays(1))} className="flex-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ backgroundColor: "#F59E0B" }}>내일</button>
+            </div>
+            <input type="date" value={val} min={real} onChange={(e) => setVal(e.target.value)} className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm mb-3" />
+            <button onClick={() => apply(val)} className="w-full rounded-lg py-2.5 text-sm font-bold text-white" style={{ backgroundColor: "#1B2B3C" }}>이 날짜로 바꾸기</button>
+            <button onClick={() => setOpen(false)} className="mt-3 w-full text-xs text-stone-400 underline underline-offset-2">닫기</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 function todayMD() {

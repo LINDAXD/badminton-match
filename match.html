@@ -2347,6 +2347,7 @@ function App() {
             </>
           )}
         </div>
+        <div className="flex items-center gap-2 shrink-0"><DateSwitcher />
         <button
           onClick={adminOn ? adminLock : tryAdminUnlock}
           className={`text-[11px] px-3 py-1.5 rounded-full border shrink-0 ${
@@ -2356,6 +2357,7 @@ function App() {
         >
           {adminOn ? "🔓 관리자" : "🔒 관리자"}
         </button>
+        </div>
         {adminOn && (
           <button
             onClick={() => setTab(tab === "players" ? "match" : "players")}
