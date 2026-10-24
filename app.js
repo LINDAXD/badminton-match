@@ -31,8 +31,12 @@ function fmtBirthday(b) {
 // 이기면 오르고 지면 내려가는데, 비슷한 상대한테 이기면 조금, 나보다 센 상대한테 이기면 더 많이 올라요.
 window.DEFAULT_SKILL_SCORE = 1000;
 
+// 처음 등록할 때 고른 실력(레벨)에 따른 시작 점수 — 경기를 치르면서 점수가 자동으로 조정돼요.
+window.LEVEL_START_SCORE = { "왕초보": 820, "초보": 920, "D조": 1000, "C조": 1100, "B조": 1200 };
 function getSkillScore(member) {
-  return (member && typeof member.skillScore === "number") ? member.skillScore : window.DEFAULT_SKILL_SCORE;
+  if (member && typeof member.skillScore === "number") return member.skillScore;
+  if (member && member.level && window.LEVEL_START_SCORE[member.level]) return window.LEVEL_START_SCORE[member.level];
+  return window.DEFAULT_SKILL_SCORE;
 }
 
 // 팀 평균 점수끼리 비교해서, 이긴 쪽/진 쪽 점수를 얼마나 올리고 내릴지 계산해요 (K=20 기준: 비슷한 상대 이기면 약 +10점).
@@ -140,7 +144,7 @@ function AppModalHost() {
           <button
             onClick={() => close(modal.type === "confirm" ? true : modal.type === "prompt" ? inputVal : true)}
             className="flex-1 rounded-lg py-2 text-sm font-semibold text-white"
-            style={{ backgroundColor: "var(--bc-blue)" }}
+            style={{ backgroundColor: "#4CAF50" }}
           >
             확인
           </button>
@@ -252,7 +256,7 @@ function combinedTodayAttendees(scheduleItems, checkinlog, roster) {
     const m = (roster || []).find((r) => r.id === c.memberId);
     if (m) map.set(m.id, { id: m.id, name: m.name });
   });
-  return [...map.values()];
+  return [...map.values()].sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko"));
 }
 
 // 로그인 기준 "출석" 통계 — 총 출석일수, 연속 출석일수 (모임 "참석" 통계와는 완전히 별개예요)
@@ -309,11 +313,6 @@ function computeAttendanceStats(memberId, checkinlog, allSessionDates) {
 // 관리자가 판단해서 회원 프로필 카드에서 부여하는 방식 하나로만 운영해요.
 function computeNoShowCount(memberId, scheduleItems, checkinlog, noshows) {
   return (noshows || []).filter((n) => n.memberId === memberId).length;
-}
-
-// 지각: 노쇼랑 똑같은 방식 — 상황을 아는 관리자가 회원 프로필 카드에서 직접 부여해요.
-function computeLateCount(memberId, lates) {
-  return (lates || []).filter((n) => n.memberId === memberId).length;
 }
 
 function earnedBadges(member, stats) {
@@ -416,12 +415,11 @@ const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 window.WEEKDAYS = WEEKDAYS;
 
 // ---------- 회원 프로필 카드 (클릭하면 열리는 모달) ----------
-function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems, kindvotes, matchhistory, dailyvotes, noshows, lates, canEdit, isAdmin, isSelf, onSave, onClose, onGiveNoShow, onGiveLate }) {
+function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems, kindvotes, matchhistory, dailyvotes, noshows, canEdit, isAdmin, isSelf, onSave, onClose, onGiveNoShow }) {
   const [edit, setEdit] = useState(false);
   const [bio, setBio] = useState(member.bio || "");
   const [career, setCareer] = useState(member.career || "");
   const [activeDay, setActiveDay] = useState(member.activeDay || "");
-  const [birthday, setBirthday] = useState(member.birthday || "");
   const [social, setSocial] = useState(member.social || {});
   const [uploading, setUploading] = useState(false);
 
@@ -432,7 +430,6 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
   });
   const badges = earnedBadges(member, stats);
   const noShowCount = computeNoShowCount(member.id, scheduleItems || [], checkinlog, noshows);
-  const lateCount = computeLateCount(member.id, lates);
   const partners = topPartners(member.id, matchhistory || [], 3);
 
   function toggleManualBadge(key) {
@@ -445,7 +442,7 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
   }
 
   function save() {
-    onSave({ bio, career, activeDay, social, birthday });
+    onSave({ bio, career, activeDay, social });
     setEdit(false);
   }
 
@@ -499,13 +496,6 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
             <div className="space-y-2 mb-4">
               <textarea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="한 줄 소개" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
               <input value={career} onChange={(e) => setCareer(e.target.value)} placeholder="배드민턴 경력 (예: 2년차)" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
-              <input
-                value={birthday}
-                onChange={(e) => setBirthday(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
-                placeholder="생일 MMDD (예: 0524)"
-                maxLength={4}
-                className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
-              />
               <select value={activeDay} onChange={(e) => setActiveDay(e.target.value)} className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm">
                 <option value="">주 활동 요일 선택</option>
                 {WEEKDAYS.map((d) => <option key={d} value={d}>{d}요일</option>)}
@@ -516,14 +506,14 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
                   {SOCIAL_TAGS.map((t) => (
                     <button key={t.key} onClick={() => toggleSocial(t.key)}
                       className={`text-xs px-2.5 py-1.5 rounded-full border ${social[t.key] ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                      style={social[t.key] ? { backgroundColor: "var(--bc-blue)" } : {}}>
+                      style={social[t.key] ? { backgroundColor: "#4CAF50" } : {}}>
                       {t.emoji} {t.label}
                     </button>
                   ))}
                 </div>
               </div>
               <div className="flex gap-2 pt-1">
-                <button onClick={save} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>저장</button>
+                <button onClick={save} className="flex-1 rounded-lg py-2 text-sm font-semibold text-white" style={{ backgroundColor: "#4CAF50" }}>저장</button>
                 <button onClick={() => setEdit(false)} className="flex-1 rounded-lg py-2 text-sm font-semibold border border-stone-200 text-stone-500">취소</button>
               </div>
             </div>
@@ -592,10 +582,6 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
               <p className="text-sm font-semibold text-stone-800">{noShowCount}회</p>
             </div>
             <div className="bg-stone-50 rounded-xl p-3">
-              <p className="text-[11px] text-stone-400">🕒 지각</p>
-              <p className="text-sm font-semibold text-stone-800">{lateCount}회</p>
-            </div>
-            <div className="bg-stone-50 rounded-xl p-3">
               <p className="text-[11px] text-stone-400">👍 또 치고싶어요</p>
               <p className="text-sm font-semibold text-stone-800">{stats.kindVotes}표</p>
             </div>
@@ -651,7 +637,7 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
                       key={b.key}
                       onClick={() => toggleManualBadge(b.key)}
                       className={`text-xs px-2.5 py-1.5 rounded-full border tap-scale ${has ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`}
-                      style={has ? { backgroundColor: "var(--bc-blue)" } : {}}
+                      style={has ? { backgroundColor: "#4CAF50" } : {}}
                     >
                       {b.emoji} {b.label} {has ? "· 지급됨" : ""}
                     </button>
@@ -662,27 +648,14 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
           )}
 
           {isAdmin && onGiveNoShow && (
-            <div className="flex flex-wrap gap-1.5">
-              <div>
-                <p className="text-[11px] text-stone-400 mb-1.5">🚫 관리자: 노쇼 부여</p>
-                <button
-                  onClick={() => onGiveNoShow(member)}
-                  className="text-xs px-2.5 py-1.5 rounded-full border border-red-200 text-red-500 bg-red-50 tap-scale"
-                >
-                  🚫 노쇼 1회 추가 (연락 없이 불참)
-                </button>
-              </div>
-              {onGiveLate && (
-                <div>
-                  <p className="text-[11px] text-stone-400 mb-1.5">🕒 관리자: 지각 부여</p>
-                  <button
-                    onClick={() => onGiveLate(member)}
-                    className="text-xs px-2.5 py-1.5 rounded-full border border-amber-200 text-amber-600 bg-amber-50 tap-scale"
-                  >
-                    🕒 지각 1회 추가
-                  </button>
-                </div>
-              )}
+            <div>
+              <p className="text-[11px] text-stone-400 mb-1.5">🚫 관리자: 노쇼 부여</p>
+              <button
+                onClick={() => onGiveNoShow(member)}
+                className="text-xs px-2.5 py-1.5 rounded-full border border-red-200 text-red-500 bg-red-50 tap-scale"
+              >
+                🚫 노쇼 1회 추가 (연락 없이 불참)
+              </button>
             </div>
           )}
         </div>
@@ -908,14 +881,31 @@ function logMatchResult(record) {
 }
 
 // ---------- 로그인 필요 화면 (비로그인 접근 제한) ----------
+function RequireLogin({ myId, children }) {
+  if (myId) return children;
+  return (
+    <div className="min-h-screen bg-white flex flex-col items-center justify-center text-center px-8">
+      <p className="text-4xl mb-3">🔒</p>
+      <p className="text-sm font-semibold text-stone-700 mb-1">로그인이 필요해요</p>
+      <p className="text-xs text-stone-400 mb-5">홈 화면에서 이름과 비밀번호로 입장한 뒤 이용할 수 있어요.</p>
+      <a
+        href="./index.html#login"
+        className="text-white text-sm font-semibold px-6 py-2.5 rounded-full"
+        style={{ backgroundColor: "#4CAF50" }}
+      >
+        🏠 홈으로 가서 입장하기
+      </a>
+    </div>
+  );
+}
+
 // ---------- 하단 고정 내비게이션 ----------
 function BottomNav({ active }) {
   const items = [
     { key: "home", href: "./index.html", icon: "🏠", label: "홈" },
-    { key: "match", href: "./match.html?tab=match", icon: "🔀", label: "매칭" },
-    { key: "results", href: "./match.html?tab=results", icon: "📝", label: "경기결과" },
-    { key: "ranking", href: "./match.html?tab=ranking", icon: "🏆", label: "랭킹" },
-    { key: "members", href: "./members.html", icon: "👥", label: "멤버" },
+    { key: "members", href: "./members.html", icon: "👥", label: "회원" },
+    { key: "match", href: "./match.html", icon: "🎲", label: "매칭·기록" },
+    { key: "more", href: "./more.html", icon: "☰", label: "더보기" },
   ];
   return (
     <nav className="bc-bottomnav">
@@ -934,7 +924,7 @@ function TopHeader({ title, subtitle }) {
   return (
     <header className="px-5 pt-6 pb-3 max-w-2xl mx-auto">
       <div className="min-w-0">
-        <a href="./index.html" className="headfont text-xs tracking-wide" style={{ color: "var(--bc-blue)" }}>🏸 BIRDIE</a>
+        <a href="./index.html" className="headfont text-xs tracking-wide" style={{ color: "#4CAF50" }}>🏸 BIRDIE</a>
         {title && <h1 className="headfont text-[26px] text-stone-900 mt-1.5 leading-tight">{title}</h1>}
         {subtitle && <p className="text-sm text-stone-400 mt-1">{subtitle}</p>}
       </div>
@@ -985,7 +975,7 @@ function ProgressBar({ value, max, color }) {
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
   return (
     <div className="bc-progress-track">
-      <div className="bc-progress-fill" style={{ width: `${pct}%`, backgroundColor: color || "var(--bc-blue)" }} />
+      <div className="bc-progress-fill" style={{ width: `${pct}%`, backgroundColor: color || "#4CAF50" }} />
     </div>
   );
 }
@@ -1048,40 +1038,3 @@ function Avatar({ name, photoUrl, size }) {
     </div>
   );
 }
-
-// ---------- 에러 발생 시 화면 전체가 하얗게 죽지 않도록 막아주는 안전장치 ----------
-// (예전에 홈 화면 코드 하나가 에러를 내서 앱 전체가 빈 화면이 됐던 사고가 있었어요. 이제 그런 에러가 나도
-//  "문제가 생겼어요" 카드만 뜨고, 새로고침하면 바로 복구할 수 있게 해요.)
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false };
-  }
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-  componentDidCatch(error, info) {
-    console.error("Birdie 화면 오류:", error, info);
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="min-h-screen flex flex-col items-center justify-center text-center px-8" style={{ backgroundColor: "#F7F9F7" }}>
-          <p className="text-4xl mb-3">🏸</p>
-          <p className="text-sm font-semibold text-stone-700 mb-1">화면을 불러오다 문제가 생겼어요</p>
-          <p className="text-xs text-stone-400 mb-5">새로고침하면 대부분 바로 해결돼요.</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="text-white text-sm font-semibold px-6 py-2.5 rounded-full"
-            style={{ backgroundColor: "var(--bc-blue)" }}
-          >
-            🔄 새로고침
-          </button>
-          <a href="./index.html" className="text-xs text-stone-400 underline underline-offset-2 mt-4">홈으로 가기</a>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-window.ErrorBoundary = ErrorBoundary;
