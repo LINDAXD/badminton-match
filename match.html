@@ -1156,8 +1156,9 @@ function App() {
   // 참석을 취소한 사람이 이미 코트(진행 중 경기/다음 경기 예약)에 들어가 있으면 빼줘요.
   // - 다음 경기 예약에 있으면 그 예약을 지워요(자동으로 다시 짜져요).
   // - 지금 경기에 있으면 대기 중인 사람 중 한 명으로 바꿔요. 바꿀 사람이 없으면 그대로 둬요(경기가 깨지지 않게).
-  async function purgeCancelledFromCourts(ids) {
+  async function purgeCancelledFromCourts(ids, manual) {
     const gone = new Set(ids);
+    let report = { replaced: 0, stuck: 0 };
     try {
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(REFS.courtmatches);
@@ -1195,7 +1196,7 @@ function App() {
             const sub = (team) => team.map((p) => {
               if (!gone.has(p.id)) return p;
               const r = spare.shift();
-              if (r) usedReplacements.add(r.id);
+              if (r) { usedReplacements.add(r.id); report.replaced++; } else { report.stuck++; }
               return r ? { id: r.id, name: r.name } : p;
             });
             mm = { ...mm, teamA: sub(mm.teamA), teamB: sub(mm.teamB) };
@@ -1212,25 +1213,39 @@ function App() {
         });
         if (changed) tx.set(REFS.courtmatches, { data: next });
       });
-    } catch (e) {}
+      if (manual) {
+        if (report.stuck > 0) appAlert(`교체할 대기자가 없어서 ${report.stuck}자리는 그대로 뒀어요. 코트 카드에서 직접 교체해주세요.`);
+        else appAlert("코트에서 정리했어요.");
+      }
+    } catch (e) {
+      if (manual) appAlert("정리에 실패했어요: " + (e && e.message ? e.message : e));
+    }
+  }
+  // 참석자 목록(players)에 없는데 코트(진행 중/다음 경기)에 들어가 있는 사람 — 참석을 취소했는데 남아있는 경우예요
+  function findGhostIds() {
+    const present = new Set(players.map((p) => p.id));
+    const attendeeIds = new Set(combinedTodayAttendees(schedule, checkinlog, roster).map((a) => a.id));
+    const ghosts = new Set();
+    Object.values(courtMatches).forEach((m) => {
+      if (m && !m.done && m.date === todayStr() && !m.friendly) {
+        [...m.teamA, ...m.teamB, ...(m.next ? [...m.next.teamA, ...m.next.teamB] : [])].forEach((p) => {
+          if (String(p.id).startsWith("guest_")) return;
+          if (!roster.some((r) => r.id === p.id)) return;
+          if (!present.has(p.id) || !attendeeIds.has(p.id)) ghosts.add(p.id);
+        });
+      }
+    });
+    return [...ghosts];
   }
   // 다른 기기/일정에서 참석을 취소한 경우에도 같은 처리를 해요
   const purgeInFlight = useRef(false);
   useEffect(() => {
     if (!roster.length || purgeInFlight.current) return;
-    const attendeeIds = new Set(combinedTodayAttendees(schedule, checkinlog, roster).map((a) => a.id));
-    const inCourts = new Set();
-    Object.values(courtMatches).forEach((m) => {
-      if (m && !m.done && m.date === todayStr() && !m.friendly) {
-        [...m.teamA, ...m.teamB].forEach((p) => inCourts.add(p.id));
-        if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => inCourts.add(p.id));
-      }
-    });
-    const gone = [...inCourts].filter((id) => !String(id).startsWith("guest_") && !attendeeIds.has(id) && roster.some((r) => r.id === id));
+    const gone = findGhostIds();
     if (!gone.length) return;
     purgeInFlight.current = true;
-    purgeCancelledFromCourts(gone).finally(() => setTimeout(() => { purgeInFlight.current = false; }, 2000));
-  }, [schedule, checkinlog, roster, courtMatches]);
+    purgeCancelledFromCourts(gone).finally(() => setTimeout(() => { purgeInFlight.current = false; }, 2500));
+  }, [schedule, checkinlog, roster, courtMatches, players]);
 
   function setMyRsvp(memberId, status) {
     try {
@@ -1778,11 +1793,104 @@ function App() {
     if (recommended !== numCourts) persistMatchSettings({ numCourts: recommended });
   }, [players.length, adminOn, meetingEndedToday, numCourtsManual, matchSettingsLoaded]);
 
+  // 📌 미리 짠 대진표(여러 라운드 미리 짜보기 → "이 대진으로 진행하기")를 실제 경기로 쓰는 부분이에요.
+  // 대진표는 경기 목록(큐)으로 저장돼요. 코트가 비면 그 순서대로 "사람들이 지금 비어있는" 첫 경기를 그 코트에 시작해요.
+  // (한 경기가 늦게 끝나서 다음 경기 사람이 아직 뛰고 있으면, 그 경기는 건너뛰고 바로 시작할 수 있는 다음 경기를 먼저 시작해요.)
+  const PLAN_REF = db.collection("badminton").doc("roundplan");
+  const [plan, setPlan] = useState({ date: null, queue: [] });
+  useEffect(() => {
+    const unsub = PLAN_REF.onSnapshot((snap) => {
+      const d = snap.data();
+      setPlan(d && d.queue ? { date: d.date || null, queue: d.queue } : { date: null, queue: [] });
+    }, () => {});
+    return () => unsub();
+  }, []);
+  const planActive = plan.date === todayStr() && plan.queue.length > 0;
+
+  async function startPlannedOnCourt(courtNum) {
+    try {
+      const res = await db.runTransaction(async (tx) => {
+        const cSnap = await tx.get(REFS.courtmatches);
+        const pSnap = await tx.get(PLAN_REF);
+        const current = (cSnap.data() || {}).data || {};
+        const planData = pSnap.data() || {};
+        if (planData.date !== todayStr() || !(planData.queue || []).length) return { ok: false, reason: "empty" };
+        const existing = current[courtNum];
+        if (existing && !existing.done && existing.date === todayStr()) return { ok: false, reason: "occupied" };
+        const busy = new Set();
+        Object.values(current).forEach((m) => {
+          if (m && !m.done && m.date === todayStr()) [...m.teamA, ...m.teamB].forEach((p) => busy.add(p.id));
+        });
+        const presentIds = new Set(players.map((p) => p.id));
+        let queue = [...planData.queue];
+        // 참석을 취소한 사람이 들어있는 경기는 대진표에서 빼요
+        queue = queue.filter((q) => [...q.teamA, ...q.teamB].every((p) => presentIds.has(p.id)));
+        const idx = queue.findIndex((q) => [...q.teamA, ...q.teamB].every((p) => !busy.has(p.id)));
+        if (idx < 0) {
+          tx.set(PLAN_REF, { ...planData, queue });
+          return { ok: false, reason: "blocked" };
+        }
+        const q = queue[idx];
+        const match = { id: uid(), court: courtNum, teamA: q.teamA, teamB: q.teamB, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(q.teamA, q.teamB), planned: true };
+        queue.splice(idx, 1);
+        tx.set(REFS.courtmatches, { data: { ...current, [courtNum]: match } });
+        tx.set(PLAN_REF, { ...planData, queue });
+        return { ok: true };
+      });
+      return !!(res && res.ok);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function applyPreviewAsPlan() {
+    if (!previewData || previewData.length === 0) return;
+    if (!(await appConfirm("미리 짠 대진표를 실제 경기 순서로 쓸까요?\n(코트가 비면 이 순서대로 시작하고, 점수를 입력할 수 있어요. 이미 예약된 다음 경기는 지워져요.)"))) return;
+    const queue = [];
+    previewData.forEach((r, i) => r.matches.forEach((mm) => queue.push({ id: uid(), round: i + 1, teamA: mm.teamA.map((p) => ({ id: p.id, name: p.name })), teamB: mm.teamB.map((p) => ({ id: p.id, name: p.name })) })));
+    try {
+      await db.runTransaction(async (tx) => {
+        const cSnap = await tx.get(REFS.courtmatches);
+        const current = (cSnap.data() || {}).data || {};
+        const cleaned = {};
+        Object.entries(current).forEach(([cn, m]) => {
+          if (m && m.next) { const { next: _n, ...rest } = m; cleaned[cn] = rest; } else cleaned[cn] = m;
+        });
+        tx.set(REFS.courtmatches, { data: cleaned });
+        tx.set(PLAN_REF, { date: todayStr(), queue });
+      });
+      appAlert(`대진표 ${queue.length}경기를 등록했어요. 빈 코트부터 이 순서대로 시작해요.`);
+    } catch (e) {
+      appAlert("대진표 등록에 실패했어요. 다시 시도해주세요.");
+    }
+  }
+  async function clearPlan() {
+    if (!(await appConfirm("남은 대진표를 지울까요? (이미 시작한 경기는 그대로예요)"))) return;
+    PLAN_REF.set({ date: null, queue: [] }).catch(() => {});
+  }
+  async function startPlannedAllEmpty() {
+    for (const cn of emptyCourtNums) {
+      const ok = await startPlannedOnCourt(cn);
+      if (!ok) break;
+    }
+  }
+
   const autoStartInFlight = useRef(false);
   useEffect(() => {
     if (!autoStart || meetingEndedToday || autoStartInFlight.current) return;
-    if (waitingPlayers.length < 4) return;
     if (emptyCourtNums.length === 0) return;
+    if (planActive) {
+      // 대진표가 남아있으면 그 순서대로만 시작해요 (임의 매칭으로 새지 않게)
+      autoStartInFlight.current = true;
+      (async () => {
+        for (const cn of emptyCourtNums) {
+          const ok = await startPlannedOnCourt(cn);
+          if (!ok) break;
+        }
+      })().finally(() => { setTimeout(() => { autoStartInFlight.current = false; }, 1500); });
+      return;
+    }
+    if (waitingPlayers.length < 4) return;
     // 두세 코트가 한꺼번에 비어도 순서대로 다 채워요 — 인원이 되는 만큼 이어서 매칭해요.
     // 혹시 모를 무한 재시도를 막기 위해, 한 번 실행에서 최대 코트 개수만큼만 시도해요.
     autoStartInFlight.current = true;
@@ -1797,7 +1905,7 @@ function App() {
     })().finally(() => {
       setTimeout(() => { autoStartInFlight.current = false; }, 1500);
     });
-  }, [autoStart, waitingPlayers.length, courtMatches, numCourts, lockedCourts, meetingEndedToday, myId]);
+  }, [autoStart, waitingPlayers.length, courtMatches, numCourts, lockedCourts, meetingEndedToday, myId, plan]);
 
   // ⏭️ 다음 경기 자동 예약 — 코트에서 경기가 진행 중인 동안, 대기 중인 사람 4명으로 "다음 경기"를 미리 짜둬요.
   // 경기가 끝나면 finishMatch가 이 예약을 바로 다음 경기로 시작하고, 그러면 또 다음 경기가 자동으로 예약돼요 (연속 진행).
@@ -1856,7 +1964,7 @@ function App() {
   }
   const autoQueueInFlight = useRef(false);
   useEffect(() => {
-    if (!autoStart || meetingEndedToday || autoQueueInFlight.current) return;
+    if (!autoStart || meetingEndedToday || autoQueueInFlight.current || planActive) return;
     if (waitingPlayers.length < 1) return;
     const targets = Object.entries(courtMatches)
       .filter(([cn, m]) => m && !m.done && m.date === todayStr() && !m.next && !m.friendly && Number(cn) <= numCourts && !lockedCourts.includes(Number(cn)))
@@ -3083,6 +3191,18 @@ function App() {
                 <button onClick={() => setPreviewData(null)} className="text-xs text-stone-400 underline underline-offset-2">닫기</button>
               )}
             </div>
+            {planActive && (
+              <div className="mt-3 rounded-xl p-3 border" style={{ borderColor: "#16A34A", backgroundColor: "#F0FDF4" }}>
+                <p className="text-xs font-bold" style={{ color: "#15803D" }}>📌 대진표로 진행 중 · 남은 {plan.queue.length}경기</p>
+                <p className="text-[11px] text-stone-500 mt-1">{plan.queue.slice(0, 3).map((q) => `${q.round}R ${q.teamA.map((p) => p.name).join("+")} vs ${q.teamB.map((p) => p.name).join("+")}`).join(" / ")}{plan.queue.length > 3 ? " …" : ""}</p>
+                {adminOn && (
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={startPlannedAllEmpty} className="flex-1 rounded-lg py-2 text-xs font-bold text-white" style={{ backgroundColor: "#16A34A" }}>빈 코트에 바로 시작</button>
+                    <button onClick={clearPlan} className="rounded-lg px-3 py-2 text-xs font-semibold border border-stone-200 text-stone-500 bg-white">대진표 지우기</button>
+                  </div>
+                )}
+              </div>
+            )}
             {previewData && (
               <div className="mt-3 space-y-2">
                 {previewData.length === 0 && <p className="text-xs text-stone-400">참석자가 4명 이상이어야 짤 수 있어요.</p>}
@@ -3097,10 +3217,29 @@ function App() {
                     {r.resting.length > 0 && <p className="text-[11px] text-stone-400 mt-1">😴 쉬는 사람: {r.resting.map((p) => p.name).join(", ")}</p>}
                   </div>
                 ))}
-                {previewData.length > 0 && <p className="text-[10px] text-stone-400">※ 미리보기예요. 실제 경기 결과·참석 변동에 따라 진행 중 자동으로 바뀔 수 있어요.</p>}
+                {previewData.length > 0 && adminOn && (
+                  <button onClick={applyPreviewAsPlan} className="w-full rounded-lg py-2.5 text-sm font-bold text-white tap-scale" style={{ backgroundColor: "#16A34A" }}>
+                    📌 이 대진으로 진행하기 (점수 입력 가능)
+                  </button>
+                )}
+                {previewData.length > 0 && <p className="text-[10px] text-stone-400">※ "진행하기"를 누르면 이 순서대로 실제 경기가 시작돼요. 안 누르면 미리보기일 뿐이에요.</p>}
               </div>
             )}
           </div>
+
+          {adminOn && (() => {
+            const ghosts = findGhostIds();
+            if (!ghosts.length) return null;
+            const names = ghosts.map((id) => (roster.find((r) => r.id === id) || {}).name).filter(Boolean).join(", ");
+            return (
+              <div className="rounded-xl p-3 border" style={{ borderColor: "#F59E0B", backgroundColor: "#FFF8E1" }}>
+                <p className="text-xs font-bold" style={{ color: "#B98900" }}>⚠️ 참석자가 아닌데 코트에 들어가 있어요: {names}</p>
+                <button onClick={() => purgeCancelledFromCourts(ghosts, true)} className="mt-2 w-full rounded-lg py-2 text-xs font-bold text-white" style={{ backgroundColor: "#1B2B3C" }}>
+                  대기자로 자동 교체하기
+                </button>
+              </div>
+            );
+          })()}
 
           <div id="court-list" className="flex items-center justify-between pt-1 -mb-1">
             <p className="text-xs uppercase tracking-widest text-stone-400">🏟️ 전체 코트 현황 ({numCourts}면)</p>
