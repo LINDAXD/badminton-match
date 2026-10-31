@@ -797,6 +797,31 @@ function App() {
     if (keptMsg) appAlert(keptMsg);
   }
 
+  // 이미 코트 수를 줄여놨는데 없어진 코트에 경기가 남아있는 경우 — 점수 입력 전 경기만 한 번에 정리해요
+  async function closeExtraCourts() {
+    const extra = Object.entries(courtMatches).filter(([cn, m]) => Number(cn) > numCourts && m && !m.done && m.date === todayStr() && !m.friendly);
+    const unscored = extra.filter(([, m]) => isUnscoredMatch(m)).map(([cn]) => cn);
+    if (unscored.length === 0) return;
+    if (!(await appConfirm(`${unscored.join("·")}번 코트의 경기(아직 점수 입력 전)를 취소할까요?\n그 경기에 있던 사람들은 대기로 돌아가요.`))) return;
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const current = (snap.data() || {}).data || {};
+        const cleaned = {};
+        Object.entries(current).forEach(([cn, m]) => {
+          if (Number(cn) > numCourts && m && !m.done && m.date === todayStr() && !m.friendly) {
+            if (isUnscoredMatch(m)) return;
+            if (m.next) { const { next: _n, ...rest } = m; cleaned[cn] = rest; return; }
+          }
+          cleaned[cn] = m;
+        });
+        tx.set(REFS.courtmatches, { data: cleaned });
+      });
+    } catch (e) {
+      appAlert("정리에 실패했어요. 다시 시도해주세요.");
+    }
+  }
+
   const meetingEndedToday = meetingEndedDate === todayStr();
   async function endTodayMeeting() {
     if (!adminOn) return;
@@ -3545,6 +3570,24 @@ function App() {
                 <button onClick={() => purgeCancelledFromCourts(ghosts, true)} className="mt-2 w-full rounded-lg py-2 text-xs font-bold text-white" style={{ backgroundColor: "#1B2B3C" }}>
                   대기자로 자동 교체하기
                 </button>
+              </div>
+            );
+          })()}
+
+          {adminOn && (() => {
+            const extra = Object.entries(courtMatches).filter(([cn, m]) => Number(cn) > numCourts && m && !m.done && m.date === todayStr() && !m.friendly);
+            if (!extra.length) return null;
+            const unscored = extra.filter(([, m]) => isUnscoredMatch(m)).map(([cn]) => cn);
+            const scored = extra.filter(([, m]) => !isUnscoredMatch(m)).map(([cn]) => cn);
+            return (
+              <div className="rounded-xl p-3 border" style={{ borderColor: "#F59E0B", backgroundColor: "#FFF8E1" }}>
+                <p className="text-xs font-bold" style={{ color: "#B98900" }}>⚠️ 코트는 {numCourts}면만 쓰는데, {extra.map(([cn]) => cn).join("·")}번 코트에 경기가 남아 있어요</p>
+                {scored.length > 0 && <p className="text-[11px] mt-1" style={{ color: "#8A6A00" }}>{scored.join("·")}번 코트는 점수가 들어간 경기라서 끝나면 사라져요.</p>}
+                {unscored.length > 0 && (
+                  <button onClick={closeExtraCourts} className="mt-2 w-full rounded-lg py-2 text-xs font-bold text-white" style={{ backgroundColor: "#1B2B3C" }}>
+                    {unscored.join("·")}번 코트 경기 취소하고 정리하기 (대기로 돌려보내기)
+                  </button>
+                )}
               </div>
             );
           })()}
