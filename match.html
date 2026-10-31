@@ -1950,6 +1950,105 @@ function App() {
     }
   }
 
+  // 👥 회원용 공유 링크 / 비밀번호 — 회원은 member.html 에서 비밀번호를 넣으면 "조회 전용" 화면만 볼 수 있어요.
+  // 관리자 화면이 열려 있는 동안 현재 매칭·경기결과·순위를 회원용 공개 사본 문서(mv_<비밀번호 해시>)에 계속 복사해둬요.
+  // 비밀번호를 모르면 그 문서 이름을 알 수 없고, 비밀번호를 새로 만들면 예전 문서는 지워져서 예전 비밀번호는 바로 막혀요.
+  // 사본에는 회원 PIN·연락처 같은 민감한 정보는 넣지 않아요 (이름·점수·승패·경기기록만).
+  const [memberPw, setMemberPw] = useState(() => { try { return localStorage.getItem("bm_memberPw") || ""; } catch (e) { return ""; } });
+  const [showMemberPw, setShowMemberPw] = useState(false);
+  const lastPublishedRef = useRef("");
+  async function sha256Hex(str) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  function buildMemberPayload() {
+    const clean = (v) => (v === "" || v == null ? "" : String(v));
+    const courts = Object.entries(courtMatches)
+      .filter(([, m]) => m && !m.done && m.date === todayStr())
+      .map(([cn, m]) => ({
+        court: m.friendly ? "친선" : (Number(cn) || cn),
+        teamA: (m.teamA || []).map((p) => p.name),
+        teamB: (m.teamB || []).map((p) => p.name),
+        scoreA: clean(m.scoreA),
+        scoreB: clean(m.scoreB),
+        next: m.next ? { teamA: m.next.teamA.map((p) => p.name), teamB: m.next.teamB.map((p) => p.name) } : null,
+      }))
+      .sort((a, b) => String(a.court).localeCompare(String(b.court), "ko", { numeric: true }));
+    const members = roster.map((r) => {
+      const st = lifetimeStatsFor(r.id);
+      const score = Math.round(seedScore(r));
+      return { name: r.name, level: r.level || "", score, games: st.games, wins: st.wins, losses: st.losses, tier: tierForScore(score, st.games) };
+    });
+    const recent = (matchhistory || []).slice(0, 150).map((h) => ({
+      date: h.date || "", time: h.time || "", court: h.court || "",
+      teamA: (h.teamA || []).map((p) => p.name), teamB: (h.teamB || []).map((p) => p.name),
+      scoreA: clean(h.scoreA), scoreB: clean(h.scoreB), winner: matchWinnerSide(h) || "",
+    }));
+    return {
+      updatedAt: Date.now(), date: todayStr(), attending: activePlayers.length,
+      courts, waiting: waitingPlayers.map((p) => p.name),
+      resting: players.filter((p) => restWish[p.id] && !leftEarly[p.id]).map((p) => p.name),
+      members, recent,
+    };
+  }
+  useEffect(() => {
+    if (!adminOn || !memberPw) return;
+    const t = setTimeout(async () => {
+      try {
+        const payload = buildMemberPayload();
+        const sig = JSON.stringify({ ...payload, updatedAt: 0 });
+        const id = "mv_" + (await sha256Hex(memberPw));
+        if (lastPublishedRef.current === id + sig) return; // 바뀐 게 없으면 다시 안 써요
+        await db.collection("badminton").doc(id).set(payload);
+        lastPublishedRef.current = id + sig;
+      } catch (e) {}
+    }, 800);
+    return () => clearTimeout(t);
+  }, [adminOn, memberPw, courtMatches, matchhistory, roster, players, restWish, leftEarly, excluded, plan, numCourts]);
+  function randomMemberPw() {
+    const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // 헷갈리는 글자(0/O, 1/I/L) 뺐어요
+    const arr = new Uint32Array(8);
+    crypto.getRandomValues(arr);
+    return [...arr].map((n) => chars[n % chars.length]).join("");
+  }
+  async function createMemberPw() {
+    if (memberPw && !(await appConfirm("비밀번호를 새로 만들까요?\n지금 비밀번호로 보고 있는 사람들은 바로 접속이 막혀요. 새 비밀번호를 다시 알려줘야 해요."))) return;
+    const pw = randomMemberPw();
+    try {
+      const newId = "mv_" + (await sha256Hex(pw));
+      await db.collection("badminton").doc(newId).set(buildMemberPayload());
+      if (memberPw) {
+        const oldId = "mv_" + (await sha256Hex(memberPw));
+        await db.collection("badminton").doc(oldId).delete();
+      }
+      try { localStorage.setItem("bm_memberPw", pw); } catch (e) {}
+      lastPublishedRef.current = "";
+      setMemberPw(pw);
+      setShowMemberPw(true);
+    } catch (e) {
+      appAlert("비밀번호를 만들지 못했어요. 인터넷 연결을 확인하고 다시 시도해주세요.");
+    }
+  }
+  async function revokeMemberPw() {
+    if (!memberPw) return;
+    if (!(await appConfirm("회원용 접속을 차단할까요?\n지금 비밀번호가 바로 막히고, 새 비밀번호를 만들기 전까지 아무도 회원 화면을 볼 수 없어요."))) return;
+    try {
+      const oldId = "mv_" + (await sha256Hex(memberPw));
+      await db.collection("badminton").doc(oldId).delete();
+    } catch (e) {
+      appAlert("차단하지 못했어요. 다시 시도해주세요.");
+      return;
+    }
+    try { localStorage.removeItem("bm_memberPw"); } catch (e) {}
+    lastPublishedRef.current = "";
+    setMemberPw("");
+    setShowMemberPw(false);
+  }
+  function copyText(text) {
+    try { navigator.clipboard.writeText(text); appAlert("복사했어요."); } catch (e) { appAlert(text); }
+  }
+  const memberLink = (typeof window !== "undefined" ? window.location.origin : "") + "/member.html";
+
   const autoStartInFlight = useRef(false);
   useEffect(() => {
     if (meetingEndedToday || autoStartInFlight.current) return;
@@ -3245,6 +3344,35 @@ function App() {
               </div>
               {waitingPlayers.length >= 4 && (
                 <p className="text-[11px] text-stone-400 mt-2">🔜 표시된 4명이 다음 코트가 열리면 우선 배정돼요. 대기 시간이 긴 회원이 다음 게임에 우선 배정돼요.</p>
+              )}
+            </div>
+          )}
+
+          {adminOn && (
+            <div className="bc-card p-4">
+              <p className="text-sm font-bold text-stone-800">👥 회원용 공유 링크 · 비밀번호</p>
+              <p className="text-[11px] text-stone-400 mt-0.5">회원은 링크에서 비밀번호를 넣으면 매칭 현황·경기 결과·랭킹을 볼 수만 있어요. (수정 불가)</p>
+              <div className="mt-3 rounded-lg border border-stone-200 px-3 py-2 text-xs text-stone-600 break-all">{memberLink}</div>
+              <button onClick={() => copyText(memberLink)} className="mt-2 w-full rounded-lg py-2 text-xs font-semibold border border-stone-200 text-stone-600 bg-white">🔗 링크 복사</button>
+              {memberPw ? (
+                <div className="mt-3">
+                  <p className="text-[11px] text-stone-400 mb-1">비밀번호 (이 기기 관리자 화면에서만 보여요)</p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 rounded-lg px-3 py-2.5 text-center text-lg font-bold tracking-widest scorefont" style={{ backgroundColor: "#F1F5F9" }}>{showMemberPw ? memberPw : "••••••••"}</div>
+                    <button onClick={() => setShowMemberPw(!showMemberPw)} className="rounded-lg px-3 py-2.5 text-xs border border-stone-200 bg-white">{showMemberPw ? "숨기기" : "보기"}</button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <button onClick={() => copyText(memberPw)} className="rounded-lg py-2 text-xs font-semibold border border-stone-200 bg-white text-stone-600">비밀번호 복사</button>
+                    <button onClick={() => copyText(`WCB 매칭 현황\n링크: ${memberLink}\n비밀번호: ${memberPw}`)} className="rounded-lg py-2 text-xs font-semibold border border-stone-200 bg-white text-stone-600">링크+비번 한 번에 복사</button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <button onClick={createMemberPw} className="rounded-lg py-2 text-xs font-bold text-white" style={{ backgroundColor: "var(--bc-navy)" }}>🔄 비밀번호 새로 만들기</button>
+                    <button onClick={revokeMemberPw} className="rounded-lg py-2 text-xs font-bold border" style={{ borderColor: "#FCA5A5", color: "#DC2626", backgroundColor: "#fff" }}>⛔ 접속 차단</button>
+                  </div>
+                  <p className="text-[10px] text-stone-400 mt-2">※ 이 관리자 화면이 열려 있는 동안 회원 화면이 실시간으로 갱신돼요. 비밀번호를 새로 만들면 예전 비밀번호는 바로 막혀요.</p>
+                </div>
+              ) : (
+                <button onClick={createMemberPw} className="bc-btn-lg bc-btn-cta w-full mt-3 text-sm">🔑 비밀번호 만들고 회원 공유 시작</button>
               )}
             </div>
           )}

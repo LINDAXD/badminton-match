@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>WCB 매칭 현황</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="./style.css" />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="./firebase.js"></script>
+</head>
+<body>
+<div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#B0B0B0;font-family:sans-serif;font-size:13px;">🏸 불러오는 중...</div></div>
+<script type="text/babel">
+// 회원 전용 조회 화면 — 읽기만 해요. 쓰기 코드는 하나도 없어요.
+// 관리자가 만든 "회원용 공개 사본" 문서(mv_<비밀번호의 해시>)만 읽어요.
+// 비밀번호를 모르면 그 문서의 이름을 알 수 없어서 내용을 볼 수 없고, 관리자가 비밀번호를 바꾸면 예전 문서가 지워져서 바로 차단돼요.
+const { useState, useEffect, useMemo } = React;
+const db = window.db;
+
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+const TIER_STYLE = {
+  A: { bg: "#FEE2E2", fg: "#B91C1C" },
+  B: { bg: "#FFEDD5", fg: "#C2410C" },
+  C: { bg: "#DCFCE7", fg: "#15803D" },
+  D: { bg: "#F1F5F9", fg: "#475569" },
+  "평가중": { bg: "#F4F4F2", fg: "#8A8A85" },
+};
+function TierBadge({ tier }) {
+  const st = TIER_STYLE[tier] || TIER_STYLE["평가중"];
+  return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: st.bg, color: st.fg }}>{tier === "평가중" ? "평가중" : `${tier}급`}</span>;
+}
+
+function TeamLine({ names, q, tone }) {
+  return (
+    <div className={`rounded-xl p-3 ${tone === "A" ? "bc-team-a" : "bc-team-b"}`}>
+      <p className={`text-[10px] font-bold tracking-widest mb-1 ${tone === "A" ? "bc-team-label-a" : "bc-team-label-b"}`}>{tone}팀</p>
+      {names.map((n) => (
+        <p key={n} className="text-sm font-semibold leading-tight" style={q && n.includes(q) ? { background: "#FEF08A", borderRadius: 4, padding: "0 4px" } : {}}>{n}</p>
+      ))}
+    </div>
+  );
+}
+
+function MatchTab({ data, q }) {
+  const courts = data.courts || [];
+  const hasQ = !!q;
+  const inTeams = (c) => [...c.teamA, ...c.teamB].some((n) => n.includes(q));
+  const inNext = (c) => c.next && [...c.next.teamA, ...c.next.teamB].some((n) => n.includes(q));
+  const mine = hasQ ? courts.filter((c) => inTeams(c) || inNext(c)) : [];
+  return (
+    <div className="space-y-3">
+      {hasQ && (
+        <div className="bc-card p-4" style={{ borderColor: "#FACC15" }}>
+          <p className="text-xs font-bold text-stone-500 mb-2">🔎 "{q}" 검색 결과</p>
+          {mine.length === 0 ? (
+            <p className="text-sm text-stone-500">지금은 코트에 배정되지 않았어요. 대기 중이거나 다음 경기를 기다리는 중일 수 있어요.</p>
+          ) : (
+            mine.map((c) => {
+              const now = inTeams(c);
+              const nxt = inNext(c);
+              return (
+                <div key={c.court} className="text-sm text-stone-700 mb-1">
+                  {now && <p>🟢 <b>{c.court}코트</b>에서 경기 중: {c.teamA.join(" + ")} <span className="text-stone-400">vs</span> {c.teamB.join(" + ")}</p>}
+                  {nxt && <p>⏭️ <b>{c.court}코트</b> 다음 경기: {c.next.teamA.join(" + ")} <span className="text-stone-400">vs</span> {c.next.teamB.join(" + ")}</p>}
+                </div>
+              );
+            })
+          )}
+          {(data.waiting || []).some((n) => n.includes(q)) && <p className="text-sm text-stone-700">⏳ 지금 대기 중이에요.</p>}
+        </div>
+      )}
+
+      {courts.length === 0 && (
+        <div className="bc-card px-4 py-10 text-center">
+          <p className="text-3xl mb-2">🏸</p>
+          <p className="text-sm font-semibold text-stone-600">지금 진행 중인 경기가 없어요</p>
+        </div>
+      )}
+      {courts.map((c) => (
+        <div key={c.court} className="bc-card overflow-hidden">
+          <div className="px-4 py-2.5 flex items-center justify-between" style={{ backgroundColor: "var(--bc-navy)" }}>
+            <p className="text-white text-sm font-bold">{typeof c.court === "number" ? `${c.court}코트` : c.court}</p>
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: "#DCFCE7", color: "#15803D" }}>🟢 경기중</span>
+          </div>
+          <div className="p-3">
+            <div className="grid grid-cols-2 gap-2">
+              <TeamLine names={c.teamA} q={q} tone="A" />
+              <TeamLine names={c.teamB} q={q} tone="B" />
+            </div>
+            {c.scoreA !== "" && c.scoreB !== "" && c.scoreA != null && c.scoreB != null && (
+              <p className="text-center text-lg font-bold mt-2 scorefont">{c.scoreA} : {c.scoreB}</p>
+            )}
+            {c.next && (
+              <div className="mt-3 rounded-xl px-3 py-2 border text-xs text-stone-700" style={{ borderColor: "var(--bc-line)", backgroundColor: "#F7FAFF" }}>
+                <span className="font-bold" style={{ color: "var(--bc-navy)" }}>⏭️ 다음 경기 </span>
+                {c.next.teamA.join(" + ")} <span className="text-stone-400">vs</span> {c.next.teamB.join(" + ")}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+
+      <div className="bc-card p-4">
+        <p className="text-xs font-bold text-stone-500 mb-2">⏳ 대기 중 ({(data.waiting || []).length}명)</p>
+        <div className="flex flex-wrap gap-1.5">
+          {(data.waiting || []).length === 0 && <span className="text-xs text-stone-400">대기 중인 사람이 없어요</span>}
+          {(data.waiting || []).map((n) => (
+            <span key={n} className="text-xs px-2.5 py-1 rounded-full border" style={q && n.includes(q) ? { background: "#FEF08A", borderColor: "#FACC15" } : { borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>{n}</span>
+          ))}
+        </div>
+        {(data.resting || []).length > 0 && <p className="text-[11px] text-stone-400 mt-2">😴 쉬는 중: {data.resting.join(", ")}</p>}
+      </div>
+    </div>
+  );
+}
+
+function ResultsTab({ data, q }) {
+  const list = (data.recent || []).filter((r) => !q || [...r.teamA, ...r.teamB].some((n) => n.includes(q)));
+  if (list.length === 0) {
+    return (
+      <div className="bc-card px-4 py-10 text-center">
+        <p className="text-3xl mb-2">📝</p>
+        <p className="text-sm font-semibold text-stone-600">{q ? "일치하는 경기가 없어요" : "아직 기록된 경기가 없어요"}</p>
+      </div>
+    );
+  }
+  let lastDate = "";
+  return (
+    <div className="space-y-3">
+      {list.map((r, i) => {
+        const showDate = r.date !== lastDate;
+        lastDate = r.date;
+        const hasScore = r.scoreA !== "" && r.scoreB !== "" && r.scoreA != null && r.scoreB != null;
+        return (
+          <React.Fragment key={i}>
+            {showDate && <p className="text-xs font-bold text-stone-400 pt-2">{r.date}</p>}
+            <div className="bc-card p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] text-stone-400">{r.court ? `${r.court}코트` : ""}{r.time ? ` · ${r.time}` : ""}</span>
+                {hasScore && <span className="scorefont text-sm font-bold text-stone-700">{r.scoreA} : {r.scoreB}</span>}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {["A", "B"].map((side) => {
+                  const names = side === "A" ? r.teamA : r.teamB;
+                  const win = r.winner === side;
+                  return (
+                    <div key={side} className={`rounded-xl p-2.5 ${side === "A" ? "bc-team-a" : "bc-team-b"} ${win ? "ring-2" : ""}`} style={win ? { "--tw-ring-color": "var(--bc-navy)" } : {}}>
+                      <p className="text-[10px] font-bold tracking-widest mb-1">{side}팀 {win && "🏆"}</p>
+                      {names.map((n) => <p key={n} className="text-sm font-semibold leading-tight">{n}</p>)}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+function RankingTab({ data, q }) {
+  const [base, setBase] = useState(null);
+  const ranked = useMemo(() => {
+    const arr = [...(data.members || [])].sort((a, b) => b.score - a.score || b.wins - a.wins || a.name.localeCompare(b.name, "ko"));
+    return arr.map((m, i) => ({ ...m, rank: i + 1 }));
+  }, [data]);
+  const total = ranked.length;
+  const found = q ? (ranked.find((m) => m.name === q) || ranked.find((m) => m.name.includes(q))) : null;
+  const baseM = base ? ranked.find((m) => m.name === base) : null;
+  const visible = q ? ranked.filter((m) => m.name.includes(q)) : ranked;
+  const rate = (m) => (m.games > 0 ? Math.round((m.wins / m.games) * 100) : 0);
+  const above = found && found.rank > 1 ? ranked[found.rank - 2] : null;
+  const below = found && found.rank < total ? ranked[found.rank] : null;
+  return (
+    <div className="space-y-3">
+      {found && (
+        <div className="bc-card p-4" style={{ borderColor: "#FACC15" }}>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-bold text-stone-800">{found.name} <TierBadge tier={found.tier} /></p>
+            <p className="text-xs text-stone-400">전체 {total}명 중</p>
+          </div>
+          <p className="headfont text-3xl text-stone-900 mt-1">{found.rank}위 <span className="text-base font-normal text-stone-500">· {found.score}점</span></p>
+          <p className="text-xs text-stone-500 mt-1">상위 {Math.max(1, Math.ceil((found.rank / total) * 100))}% · {found.wins}승 {found.losses}패{found.games > 0 ? ` (승률 ${rate(found)}%)` : ""}</p>
+          <div className="mt-2 text-xs text-stone-600 space-y-0.5">
+            {ranked[0] && found.rank > 1 && <p>1위 {ranked[0].name}님과 <b>{ranked[0].score - found.score}점</b> 차이</p>}
+            {above && <p>바로 위 {above.rank}위 {above.name}님과 <b>{above.score - found.score}점</b> 차이</p>}
+            {below && <p>바로 아래 {below.rank}위 {below.name}님과 <b>{found.score - below.score}점</b> 차이</p>}
+          </div>
+        </div>
+      )}
+      <p className="text-[11px] text-stone-400">이름을 누르면 그 사람 기준으로 점수 차이를 비교해요. {base && <button className="underline ml-1" onClick={() => setBase(null)}>비교 해제</button>}</p>
+      <div className="bc-card overflow-hidden">
+        {visible.map((m) => {
+          const isBase = base === m.name;
+          const diff = baseM && !isBase ? m.score - baseM.score : null;
+          return (
+            <button key={m.name} onClick={() => setBase(isBase ? null : m.name)} className="w-full text-left px-3 py-2.5 flex items-center gap-3 border-b last:border-b-0" style={{ borderColor: "var(--bc-line)", background: isBase ? "#FEF9C3" : "transparent" }}>
+              <span className="w-7 text-center text-sm font-bold" style={{ color: m.rank <= 3 ? "#B45309" : "#94A3B8" }}>{m.rank}</span>
+              <span className="flex-1 min-w-0">
+                <span className="text-sm font-semibold text-stone-800 truncate">{m.name}</span> <TierBadge tier={m.tier} />
+                <span className="block text-[11px] text-stone-400">{m.wins}승 {m.losses}패{m.games > 0 ? ` · 승률 ${rate(m)}%` : ""}</span>
+              </span>
+              <span className="text-right">
+                <span className="block text-sm font-bold scorefont text-stone-800">{m.score}</span>
+                {diff !== null && <span className="block text-[11px] font-bold" style={{ color: diff >= 0 ? "#16A34A" : "#DC2626" }}>{diff >= 0 ? "+" : ""}{diff}</span>}
+              </span>
+            </button>
+          );
+        })}
+        {visible.length === 0 && <p className="text-xs text-stone-400 text-center py-6">일치하는 이름이 없어요</p>}
+      </div>
+      <p className="text-[10px] text-stone-400">점수는 경기 승패에 따라 오르내려요. 처음 3경기 전에는 "평가중"이에요.</p>
+    </div>
+  );
+}
+
+function MemberApp() {
+  const [pw, setPw] = useState(() => { try { return localStorage.getItem("bm_mvpw") || ""; } catch (e) { return ""; } });
+  const [input, setInput] = useState("");
+  const [data, setData] = useState(null);
+  const [status, setStatus] = useState(pw ? "loading" : "gate");
+  const [err, setErr] = useState("");
+  const [tab, setTab] = useState("match");
+  const [q, setQ] = useState("");
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
+
+  useEffect(() => {
+    if (!pw) return;
+    let unsub = null;
+    let cancelled = false;
+    (async () => {
+      let id;
+      try { id = "mv_" + (await sha256Hex(pw)); } catch (e) { setErr("이 브라우저에서는 사용할 수 없어요."); setStatus("gate"); return; }
+      if (cancelled) return;
+      unsub = db.collection("badminton").doc(id).onSnapshot(
+        (snap) => {
+          if (!snap.exists) {
+            // 비밀번호가 틀렸거나, 관리자가 비밀번호를 바꾸거나 접속을 차단한 경우
+            try { localStorage.removeItem("bm_mvpw"); } catch (e) {}
+            setPw(""); setData(null); setStatus("gate");
+            setErr("비밀번호가 맞지 않거나 바뀌었어요. 관리자에게 새 비밀번호를 받아주세요.");
+            return;
+          }
+          setData(snap.data());
+          setStatus("ok");
+        },
+        () => { setErr("연결에 문제가 있어요. 잠시 후 다시 시도해주세요."); setStatus("gate"); }
+      );
+    })();
+    return () => { cancelled = true; if (unsub) unsub(); };
+  }, [pw]);
+
+  function submit() {
+    const v = input.trim().toUpperCase();
+    if (!v) return;
+    setErr("");
+    try { localStorage.setItem("bm_mvpw", v); } catch (e) {}
+    setStatus("loading");
+    setPw(v);
+  }
+  function logout() {
+    try { localStorage.removeItem("bm_mvpw"); } catch (e) {}
+    setPw(""); setData(null); setStatus("gate"); setInput("");
+  }
+
+  if (status !== "ok") {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6" style={{ backgroundColor: "#F7F8FA" }}>
+        <div className="bc-card p-6 w-full max-w-sm">
+          <p className="text-2xl mb-1">🏸</p>
+          <p className="headfont text-xl text-stone-900">WCB 매칭 현황</p>
+          <p className="text-xs text-stone-400 mt-1 mb-4">관리자에게 받은 비밀번호를 입력해주세요.</p>
+          {status === "loading" ? (
+            <p className="text-sm text-stone-400 py-4 text-center">불러오는 중...</p>
+          ) : (
+            <>
+              <input
+                autoFocus
+                value={input}
+                onChange={(e) => { setInput(e.target.value); if (err) setErr(""); }}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                placeholder="비밀번호"
+                autoCapitalize="characters"
+                className="w-full rounded-xl border border-stone-300 px-3 py-3 text-base tracking-widest text-center focus:outline-none focus:ring-2"
+              />
+              <button onClick={submit} className="bc-btn-lg bc-btn-cta w-full mt-3 text-base">입장하기</button>
+              {err && <p className="text-xs mt-3 rounded-lg p-2.5" style={{ backgroundColor: "#FFF8E1", color: "#B98900" }}>{err}</p>}
+            </>
+          )}
+          <p className="text-[10px] text-stone-300 mt-4 text-center">조회 전용 화면이에요. 매칭이나 점수는 바꿀 수 없어요.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const stale = data.updatedAt && now - data.updatedAt > 10 * 60 * 1000;
+  const tabs = [["match", "🏸 매칭 현황"], ["results", "📝 경기 결과"], ["rank", "🏆 랭킹"]];
+  return (
+    <div className="min-h-screen pb-10" style={{ backgroundColor: "#F7F8FA", color: "#2A2A28" }}>
+      <header className="px-5 pt-5 pb-2 max-w-2xl mx-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="headfont text-xl text-stone-900">🏸 WCB 매칭 현황</p>
+            <p className="text-[11px] text-stone-400 mt-0.5">
+              <span style={{ color: "#16A34A" }}>● 실시간</span> · {data.date} · 참석 {data.attending || 0}명
+              {data.updatedAt ? ` · 갱신 ${new Date(data.updatedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+            </p>
+          </div>
+          <button onClick={logout} className="text-[11px] text-stone-400 underline underline-offset-2">나가기</button>
+        </div>
+        {stale && <p className="text-[11px] mt-2 rounded-lg p-2" style={{ backgroundColor: "#FFF8E1", color: "#B98900" }}>⚠️ 관리자 화면이 한동안 갱신되지 않았어요. 정보가 오래됐을 수 있어요.</p>}
+      </header>
+      <div className="max-w-2xl mx-auto px-5">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value.trim())}
+          placeholder="🔎 내 이름 검색 (경기·순위에서 찾아줘요)"
+          className="w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm my-3 bg-white focus:outline-none"
+        />
+        <div className="flex gap-1.5 mb-3">
+          {tabs.map(([k, label]) => (
+            <button key={k} onClick={() => setTab(k)} className={`flex-1 rounded-xl py-2.5 text-xs font-bold border ${tab === k ? "text-white border-transparent" : "bg-white text-stone-500 border-stone-200"}`} style={tab === k ? { backgroundColor: "var(--bc-navy)" } : {}}>{label}</button>
+          ))}
+        </div>
+        {tab === "match" && <MatchTab data={data} q={q} />}
+        {tab === "results" && <ResultsTab data={data} q={q} />}
+        {tab === "rank" && <RankingTab data={data} q={q} />}
+      </div>
+    </div>
+  );
+}
+
+window.authReadyPromise.then(() => {
+  ReactDOM.createRoot(document.getElementById("root")).render(<MemberApp />);
+});
+</script>
+</body>
+</html>
