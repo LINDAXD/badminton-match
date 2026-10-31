@@ -1585,6 +1585,12 @@ function App() {
     }
   });
   reservedNextIds.forEach((id) => { if (playingNowIds.has(id)) reservedNextIds.delete(id); });
+  // 선수 교체 목록 — "지금 코트에서 뛰고 있지 않은 모든 참석자"를 보여줘요 (다음 경기로 예약된 사람, 쉬기 표시한 사람도 포함).
+  // 예전엔 대기 후보(waitingPlayers)만 보여줘서, 자동 예약에 들어간 사람이 목록에서 사라졌어요.
+  const swapCandidates = players
+    .filter((p) => !playingNowIds.has(p.id) && !leftEarly[p.id])
+    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  const swapLabel = (p) => p.name + (reservedNextIds.has(p.id) ? " (다음 경기 예약)" : restWish[p.id] ? " (쉬는 중)" : excluded.includes(p.id) ? " (매칭 제외)" : "");
   const displayWaitingCount = players.filter(
     (p) => !playingNowIds.has(p.id) && !leftEarly[p.id] && !excluded.includes(p.id)
   ).length;
@@ -1725,12 +1731,19 @@ function App() {
         const occupiedElsewhere = new Set();
         Object.entries(current).forEach(([cn, cm]) => {
           if (Number(cn) === courtNum) return;
-          if (cm && !cm.done && cm.date === todayStr()) { [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id)); if (cm.next) [...cm.next.teamA, ...cm.next.teamB].forEach((p) => occupiedElsewhere.add(p.id)); }
+          if (cm && !cm.done && cm.date === todayStr()) { [...cm.teamA, ...cm.teamB].forEach((p) => occupiedElsewhere.add(p.id)); }
         });
         if (occupiedElsewhere.has(newPlayerId)) return { ok: false, reason: "elsewhere" };
         const swap = (team) => team.map((p) => (p.id === oldPlayerId ? { id: newPlayer.id, name: newPlayer.name } : p));
         const updated = { ...m, teamA: swap(m.teamA), teamB: swap(m.teamB) };
         const next = { ...current, [courtNum]: updated };
+        // 다음 경기로 "예약만" 돼 있던 사람을 데려오면, 그 예약은 지워요 (자동으로 다시 짜져요)
+        Object.entries(next).forEach(([cn, cm]) => {
+          if (cm && cm.next && [...cm.next.teamA, ...cm.next.teamB].some((p) => p.id === newPlayerId)) {
+            const { next: _d, ...rest } = cm;
+            next[cn] = rest;
+          }
+        });
         tx.set(REFS.courtmatches, { data: next });
         return { ok: true };
       });
@@ -3520,10 +3533,10 @@ function App() {
                                           className="flex-1 text-xs border border-stone-200 rounded-lg px-2 py-1"
                                         >
                                           <option value="">다른 사람으로 교체...</option>
-                                          {waitingPlayers.length > 0 && (
-                                            <optgroup label="대기 중">
-                                              {waitingPlayers.map((wp) => (
-                                                <option key={wp.id} value={`wait:${wp.id}`}>{wp.name}</option>
+                                          {swapCandidates.length > 0 && (
+                                            <optgroup label="대기 중 · 예약된 사람">
+                                              {swapCandidates.map((wp) => (
+                                                <option key={wp.id} value={`wait:${wp.id}`}>{swapLabel(wp)}</option>
                                               ))}
                                             </optgroup>
                                           )}
@@ -3539,7 +3552,7 @@ function App() {
                                         </select>
                                       </div>
                                     ))}
-                                    {waitingPlayers.length === 0 && Object.values(courtMatches).filter((cm) => cm && !cm.done && cm.date === todayStr()).length <= 1 && (
+                                    {swapCandidates.length === 0 && Object.values(courtMatches).filter((cm) => cm && !cm.done && cm.date === todayStr()).length <= 1 && (
                                       <p className="text-[11px] text-stone-400 text-center py-1">지금 바꿀 수 있는 사람이 없어요.</p>
                                     )}
                                   </div>
