@@ -3247,7 +3247,7 @@ function App() {
             </div>
             <div className="flex items-center gap-2 mt-3">
               <select value={previewRounds} onChange={(e) => setPreviewRounds(Number(e.target.value))} className="text-xs border border-stone-200 rounded-lg px-2 py-2 bg-white">
-                {[3, 4, 5, 6, 8, 10].map((n) => (<option key={n} value={n}>{n}라운드</option>))}
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((n) => (<option key={n} value={n}>{n}라운드</option>))}
               </select>
               <button onClick={buildPreview} className="flex-1 rounded-lg py-2 text-sm font-bold text-white tap-scale" style={{ backgroundColor: "var(--bc-blue)" }}>
                 {previewData ? "🔄 다시 짜기" : "📋 미리 짜보기"}
