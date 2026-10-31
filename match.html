@@ -549,7 +549,7 @@ function App() {
   const [numCourtsManual, setNumCourtsManual] = useState(false); // 관리자가 +/- 로 직접 바꾼 적 있으면, 인원 변동에 따른 자동 조정을 멈춰요
   const [meetingEndedDate, setMeetingEndedDate] = useState(null);
   // 기본값은 꺼짐이에요 — 처음 체크인했을 때 다들 "대기 중"으로만 보이고, 매칭은 관리자/회원이 직접 눌러야 시작돼요.
-  const [autoStart, setAutoStart] = useState(true);
+  const [autoStart, setAutoStart] = useState(false);
   // 점수 입력 후 자동 종료되기까지 기다리는 시간(초) — 관리자가 조절 가능, 기본 6초
   const [autoFinishDelaySec, setAutoFinishDelaySec] = useState(6);
   // 친선전(점수 없는) 칸 개수 — 기본 1개, 관리자가 늘리거나 줄일 수 있어요
@@ -687,7 +687,7 @@ function App() {
       setNumCourtsManual(!!(data && data.numCourtsManual));
       setMatchSettingsLoaded(true);
       setMeetingEndedDate((data && data.meetingEndedDate) || null);
-      setAutoStart(data && data.autoStart !== undefined ? data.autoStart : true);
+      setAutoStart(!!(data && data.autoMatch === true)); // 자동 매칭은 관리자가 직접 켠 경우에만 켜져요 (기본 꺼짐)
       setAutoFinishDelaySec(data && data.autoFinishDelaySec !== undefined ? data.autoFinishDelaySec : 6);
       setFriendlyCourts(data && data.friendlyCourts !== undefined ? data.friendlyCourts : 1);
     }, () => {});
@@ -734,6 +734,7 @@ function App() {
       numCourtsManual: patch.numCourtsManual !== undefined ? patch.numCourtsManual : cur.numCourtsManual,
       meetingEndedDate: patch.meetingEndedDate !== undefined ? patch.meetingEndedDate : cur.meetingEndedDate,
       autoStart: patch.autoStart !== undefined ? patch.autoStart : cur.autoStart,
+      autoMatch: patch.autoStart !== undefined ? patch.autoStart : cur.autoStart,
       autoFinishDelaySec: patch.autoFinishDelaySec !== undefined ? patch.autoFinishDelaySec : cur.autoFinishDelaySec,
       friendlyCourts: patch.friendlyCourts !== undefined ? patch.friendlyCourts : cur.friendlyCourts,
     };
@@ -1951,8 +1952,9 @@ function App() {
 
   const autoStartInFlight = useRef(false);
   useEffect(() => {
-    if (!autoStart || meetingEndedToday || autoStartInFlight.current) return;
+    if (meetingEndedToday || autoStartInFlight.current) return;
     if (emptyCourtNums.length === 0) return;
+    if (!autoStart && !planActive) return;
     if (planActive) {
       // 대진표가 남아있으면 그 순서대로만 시작해요 (임의 매칭으로 새지 않게)
       autoStartInFlight.current = true;
@@ -2091,10 +2093,19 @@ function App() {
         // 2) 코트에 나눠 넣을 땐, 같은 코트에서 방금 같이 끝난 사람들끼리 다시 뭉치지 않도록
         //    "몇 번째로 뽑혔는지" 기준으로 라운드로빈으로 흩어서 각 코트에 배분해요.
         const courtsToFill = targets.slice(0, Math.floor(chosen.length / 4));
-        const groups = courtsToFill.map(() => []);
-        chosen.forEach((p, i) => {
-          if (i < courtsToFill.length * 4) groups[i % courtsToFill.length].push(p);
-        });
+        const k = courtsToFill.length;
+        // 뽑힌 사람들을 실력 순으로 4등분해서 각 코트에 한 명씩 고르게 넣어요 (못하는 사람끼리/잘하는 사람끼리 몰리지 않게).
+        // 여러 번 시도해서 같이 친 기록이 가장 안 겹치는 배치를 골라요.
+        const picked = chosen.slice(0, k * 4);
+        let groups = courtsToFill.map(() => []);
+        let bestTotal = Infinity;
+        for (let t = 0; t < 40; t++) {
+          const bySkill = [...picked].sort((x, y) => skillOf(y.id) - skillOf(x.id));
+          const quarters = [0, 1, 2, 3].map((q) => shuffleArr(bySkill.slice(q * k, (q + 1) * k)));
+          const trial = courtsToFill.map((_, i) => quarters.map((qr) => qr[i]));
+          const total = trial.reduce((sum, four) => sum + splitScore(four, matchCtx).s, 0);
+          if (total < bestTotal) { bestTotal = total; groups = trial; }
+        }
 
         const nextCourts = { ...current };
         let count = 0;
