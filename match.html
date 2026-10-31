@@ -753,6 +753,50 @@ function App() {
     REFS.matchmode.set(next).catch(() => {});
   }
 
+  // 점수·승리팀 선택이 하나도 없는, 진행 중인 경기인지
+  const isUnscoredMatch = (m) => !!m && !m.done && m.date === todayStr() && !m.friendly && (m.scoreA === "" || m.scoreA == null) && (m.scoreB === "" || m.scoreB == null) && !m.winnerOverride;
+
+  // 사용할 코트 수 바꾸기. 줄일 때 없어지는 코트에 "점수 입력 전" 경기가 있으면 같이 정리해요
+  // (예전엔 경기가 남아있다는 이유로 줄인 코트가 화면에 계속 떠서 안 바뀐 것처럼 보였어요).
+  // 점수가 이미 들어간 경기는 끝날 때까지 두고, 끝나면 그 코트는 사라져요 (그 코트의 '다음 경기' 예약은 지워요).
+  async function changeCourtCount(n) {
+    n = Math.max(1, n);
+    if (n === numCourts) return;
+    let keptMsg = "";
+    if (n < numCourts) {
+      const extra = Object.entries(courtMatches).filter(([cn, m]) => Number(cn) > n && m && !m.done && m.date === todayStr() && !m.friendly);
+      const unscored = extra.filter(([, m]) => isUnscoredMatch(m)).map(([cn]) => cn);
+      const kept = extra.filter(([, m]) => !isUnscoredMatch(m)).map(([cn]) => cn);
+      if (unscored.length > 0) {
+        const ok = await appConfirm(`코트를 ${n}면으로 줄이면 ${unscored.join("·")}번 코트의 경기(아직 점수 입력 전)가 취소돼요.\n그 경기에 있던 사람들은 대기로 돌아가요.\n\n확인 = 취소하고 ${n}면으로 줄이기\n취소 = 코트 수 그대로`);
+        if (!ok) return;
+      }
+      if (kept.length > 0) keptMsg = `${kept.join("·")}번 코트는 점수가 이미 들어간 경기라서, 그 경기가 끝나면 사라져요.`;
+      if (extra.length > 0) {
+        try {
+          await db.runTransaction(async (tx) => {
+            const snap = await tx.get(REFS.courtmatches);
+            const current = (snap.data() || {}).data || {};
+            const cleaned = {};
+            Object.entries(current).forEach(([cn, m]) => {
+              if (Number(cn) > n && m && !m.done && m.date === todayStr() && !m.friendly) {
+                if (isUnscoredMatch(m)) return; // 점수 입력 전 경기는 비워요
+                if (m.next) { const { next: _n, ...rest } = m; cleaned[cn] = rest; return; }
+              }
+              cleaned[cn] = m;
+            });
+            tx.set(REFS.courtmatches, { data: cleaned });
+          });
+        } catch (e) {
+          appAlert("코트 정리에 실패했어요. 다시 시도해주세요.");
+          return;
+        }
+      }
+    }
+    persistMatchSettings({ numCourts: n, numCourtsManual: true });
+    if (keptMsg) appAlert(keptMsg);
+  }
+
   const meetingEndedToday = meetingEndedDate === todayStr();
   async function endTodayMeeting() {
     if (!adminOn) return;
@@ -1261,6 +1305,63 @@ function App() {
     });
     return [...ghosts];
   }
+  // 같은 사람이 서로 다른 코트에 동시에 들어가 있는 경우를 찾아요
+  // (지금 경기끼리 겹침 / 다른 코트의 "다음 경기"와 겹침 / 두 코트의 "다음 경기"끼리 겹침).
+  // 같은 코트에서 "지금 경기 → 다음 경기"로 이어서 뛰는 건(대기 인원이 모자랄 때) 겹침으로 안 쳐요.
+  function findDoubleBooked() {
+    const where = {};
+    Object.entries(courtMatches).forEach(([cn, m]) => {
+      if (!m || m.done || m.date !== todayStr() || m.friendly) return;
+      [...m.teamA, ...m.teamB].forEach((p) => { (where[p.id] = where[p.id] || []).push({ court: String(cn), kind: "now", name: p.name }); });
+      if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => { (where[p.id] = where[p.id] || []).push({ court: String(cn), kind: "next", name: p.name }); });
+    });
+    const out = [];
+    Object.entries(where).forEach(([id, locs]) => {
+      const nowCourts = new Set(locs.filter((l) => l.kind === "now").map((l) => l.court));
+      const nextCourts = new Set(locs.filter((l) => l.kind === "next").map((l) => l.court));
+      const nowVsNow = nowCourts.size > 1;
+      const nowVsNext = [...nextCourts].some((c) => [...nowCourts].some((n) => n !== c));
+      const nextVsNext = nextCourts.size > 1;
+      if (nowVsNow || nowVsNext || nextVsNext) out.push({ id, name: locs[0].name, locs, nowVsNow });
+    });
+    return out;
+  }
+  // 겹친 "다음 경기 예약"은 지워요 (필요하면 자동으로 다시 짜져요). 지금 경기끼리 겹친 건 손대지 않고 알려만 줘요.
+  async function fixDoubleBooked() {
+    try {
+      return await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const current = (snap.data() || {}).data || {};
+        const nowAt = {};
+        Object.entries(current).forEach(([cn, m]) => {
+          if (!m || m.done || m.date !== todayStr() || m.friendly) return;
+          [...m.teamA, ...m.teamB].forEach((p) => { (nowAt[p.id] = nowAt[p.id] || new Set()).add(String(cn)); });
+        });
+        const nextSeen = {};
+        const out = { ...current };
+        let removed = 0;
+        Object.entries(current).forEach(([cn, m]) => {
+          if (!m || m.done || m.date !== todayStr() || m.friendly || !m.next) return;
+          const ids = [...m.next.teamA, ...m.next.teamB].map((p) => p.id);
+          const clash = ids.some((id) => [...(nowAt[id] || [])].some((c) => c !== String(cn)) || (nextSeen[id] && nextSeen[id] !== String(cn)));
+          if (clash) { const { next: _d, ...rest } = m; out[cn] = rest; removed++; }
+          else ids.forEach((id) => { nextSeen[id] = String(cn); });
+        });
+        if (removed) tx.set(REFS.courtmatches, { data: out });
+        return removed;
+      });
+    } catch (e) {
+      return 0;
+    }
+  }
+  const dupFixInFlight = useRef(false);
+  useEffect(() => {
+    if (!adminOn || dupFixInFlight.current) return;
+    if (!findDoubleBooked().length) return;
+    dupFixInFlight.current = true;
+    fixDoubleBooked().finally(() => setTimeout(() => { dupFixInFlight.current = false; }, 2500));
+  }, [courtMatches, adminOn]);
+
   // 다른 기기/일정에서 참석을 취소한 경우에도 같은 처리를 해요
   const purgeInFlight = useRef(false);
   useEffect(() => {
@@ -2659,7 +2760,8 @@ function App() {
     setHistory((hArr) => [{ ...finished, round: matchSeq }, ...hArr]);
 
     // 미리 정해둔 "다음 경기"가 있으면, 끝나자마자 바로 그 매칭으로 시작해요. 없으면 예전처럼 빈 코트로 남아요.
-    const nextCourtState = m.next
+    // (줄여서 없어진 코트라면 다음 경기를 거기서 시작하지 않고 그냥 비워요)
+    const nextCourtState = (m.next && courtNum <= numCourts)
       ? { id: uid(), court: courtNum, teamA: m.next.teamA, teamB: m.next.teamB, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: m.next.captainId || pickCaptain(m.next.teamA, m.next.teamB) }
       : finished;
     persistCourtMatches(courtNum, nextCourtState);
@@ -2891,14 +2993,14 @@ function App() {
               <p className="text-sm font-semibold mb-2">사용할 코트 수</p>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => persistMatchSettings({ numCourts: Math.max(1, numCourts - 1), numCourtsManual: true })}
+                  onClick={() => changeCourtCount(numCourts - 1)}
                   className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center"
                 >
                   −
                 </button>
                 <span className="scorefont text-xl w-8 text-center">{numCourts}</span>
                 <button
-                  onClick={() => persistMatchSettings({ numCourts: numCourts + 1, numCourtsManual: true })}
+                  onClick={() => changeCourtCount(numCourts + 1)}
                   className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center"
                 >
                   +
@@ -3447,8 +3549,25 @@ function App() {
             );
           })()}
 
+          {adminOn && (() => {
+            const dups = findDoubleBooked().filter((d) => d.nowVsNow);
+            if (!dups.length) return null;
+            return (
+              <div className="rounded-xl p-3 border" style={{ borderColor: "#EF4444", backgroundColor: "#FEF2F2" }}>
+                <p className="text-xs font-bold" style={{ color: "#B91C1C" }}>⚠️ 같은 시간에 두 코트에 들어가 있는 사람이 있어요</p>
+                <p className="text-xs mt-1" style={{ color: "#7F1D1D" }}>
+                  {dups.map((d) => `${d.name}(${[...new Set(d.locs.filter((l) => l.kind === "now").map((l) => l.court))].join("·")}코트)`).join(", ")}
+                </p>
+                <p className="text-[11px] mt-1" style={{ color: "#7F1D1D" }}>해당 코트에서 "선수 교체"로 한쪽을 다른 사람으로 바꿔주세요.</p>
+              </div>
+            );
+          })()}
+
           <div id="court-list" className="flex items-center justify-between pt-1 -mb-1">
-            <p className="text-xs uppercase tracking-widest text-stone-400">🏟️ 전체 코트 현황 ({numCourts}면)</p>
+            <p className="text-xs uppercase tracking-widest text-stone-400">🏟️ 전체 코트 현황 ({numCourts}면){(() => {
+              const ex = Object.entries(courtMatches).filter(([cn, m]) => Number(cn) > numCourts && m && !m.done && m.date === todayStr()).map(([cn]) => cn);
+              return ex.length ? <span className="normal-case tracking-normal"> · {ex.join("·")}번 코트는 진행 중인 경기가 끝나면 사라져요</span> : null;
+            })()}</p>
           </div>
 
           {(() => {
@@ -3467,7 +3586,7 @@ function App() {
             return (
               <div key={courtNum} className="rise-in bc-card overflow-hidden">
                 <div className="px-4 py-2.5 flex justify-between items-center" style={{ background: "linear-gradient(135deg, #223A5E 0%, #16233D 100%)" }}>
-                  <span className="text-white text-[11px] font-bold uppercase tracking-[0.15em]">코트 {courtNum} {lockedCourts.includes(courtNum) && "🔒"}</span>
+                  <span className="text-white text-[11px] font-bold uppercase tracking-[0.15em]">코트 {courtNum} {lockedCourts.includes(courtNum) && "🔒"}{courtNum > numCourts && " (마무리 중)"}</span>
                   <div className="flex items-center gap-2">
                     {m && m.done && <span className="bc-badge2 bc-badge2-done">종료</span>}
                     {m && !m.done && <span className="bc-badge2 bc-badge2-playing">🟢 경기중</span>}
@@ -3592,7 +3711,17 @@ function App() {
                           <div className="rounded-xl px-3 py-2 border flex items-center justify-between gap-2" style={{ borderColor: "var(--bc-line)", backgroundColor: "#F7FAFF" }}>
                             <p className="text-xs text-stone-700 min-w-0">
                               <span className="font-bold" style={{ color: "var(--bc-blue)" }}>⏭️ 다음 경기 </span>
-                              {m.next.teamA.map((p) => p.name).join(" + ")} <span className="text-stone-400">vs</span> {m.next.teamB.map((p) => p.name).join(" + ")}
+                              {(() => {
+                                const nowIds = new Set([...m.teamA, ...m.teamB].map((p) => p.id));
+                                const nm = (p) => p.name + (nowIds.has(p.id) ? "↺" : "");
+                                const again = [...m.next.teamA, ...m.next.teamB].some((p) => nowIds.has(p.id));
+                                return (
+                                  <>
+                                    {m.next.teamA.map(nm).join(" + ")} <span className="text-stone-400">vs</span> {m.next.teamB.map(nm).join(" + ")}
+                                    {again && <span className="block text-[10px] text-stone-400 mt-0.5">↺ = 지금 경기에 이어서 한 번 더 뛰는 사람 (대기 인원이 모자라서 채웠어요)</span>}
+                                  </>
+                                );
+                              })()}
                             </p>
                             {adminOn && (
                               <button onClick={() => resetQueuedNext(courtNum)} className="text-[11px] text-stone-400 underline underline-offset-2 shrink-0">다시 짜기</button>
