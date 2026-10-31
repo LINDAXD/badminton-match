@@ -121,7 +121,16 @@ function splitScore(four, ctx, excludeKey) {
       });
     }
 
-    const s = historyScore + todayPenalty + skillScore + mixBonus + firstTimerBonus;
+    // 6) 왕초보/승률 낮은 사람끼리 같은 팀이 되는 것 방지 — 두 명 다 하위권이면 크게 감점해서, 다른 조합이 있으면 안 뽑히게 해요.
+    let weakPairPenalty = 0;
+    if (mode !== "social" && skillOf) {
+      const WEAK = 0.35; // 대략 왕초보(820점)·승률이 많이 낮은 사람
+      [a, b].forEach((team) => {
+        if (skillOf(team[0].id) < WEAK && skillOf(team[1].id) < WEAK) weakPairPenalty += 25;
+      });
+    }
+
+    const s = historyScore + todayPenalty + skillScore + mixBonus + firstTimerBonus + weakPairPenalty;
     if (!best || s < best.s) best = { s, a, b };
   }
   return best;
@@ -151,10 +160,21 @@ function generateRound(players, numCourts, hist, restIds = new Set(), skillOf = 
   const usable = playing.slice(0, Math.floor(playing.length / 4) * 4);
   const resting = [...forcedRest, ...sorted.slice(usable.length)];
 
+  // 4명씩 묶을 때 실력 순으로 4등분(상·중상·중하·하)해서 각 경기에 한 명씩 고르게 들어가게 해요.
+  // 그러면 한 경기 안에 "잘하는 사람 + 못하는 사람"이 섞여서, 팀을 나눌 때 못하는 사람끼리 한 팀이 되는 일이 거의 없어요.
+  function mixedGrouping() {
+    if (!skillOf || usable.length % 4 !== 0 || usable.length === 0) return shuffleArray(usable);
+    const k = usable.length / 4;
+    const bySkill = [...usable].sort((x, y) => skillOf(y.id) - skillOf(x.id));
+    const quarters = [0, 1, 2, 3].map((q) => shuffleArray(bySkill.slice(q * k, (q + 1) * k)));
+    const out = [];
+    for (let i = 0; i < k; i++) quarters.forEach((qr) => out.push(qr[i]));
+    return out;
+  }
   let bestAssignment = null;
   let bestTotal = Infinity;
-  for (let t = 0; t < 40; t++) {
-    const shuffled = shuffleArray(usable);
+  for (let t = 0; t < 60; t++) {
+    const shuffled = t % 4 === 3 ? shuffleArray(usable) : mixedGrouping();
     let total = 0;
     const courts = [];
     for (let i = 0; i < shuffled.length; i += 4) {
@@ -1603,6 +1623,25 @@ function App() {
     const mixedRest = shuffleArr([...benchedPool.slice(guaranteedCount), ...restPool]);
     return [...guaranteed, ...mixedRest].slice(0, need);
   }
+  // 4명 뽑기 — 대기 오래된(밀린) 사람 2명은 반드시 넣고, 나머지 2자리는 후보 중에서
+  // "두 팀 실력이 가장 비슷하게 나눠지고, 최근에 같이 친 사람과 안 겹치는" 조합으로 골라요.
+  // 그러면 매번 못하는 사람끼리/잘하는 사람끼리 몰리지 않고, 항상 비슷한 수준으로 섞여요 (순서 공평성은 그대로 유지).
+  function pickBalancedFour(pool) {
+    const ordered = pickFromPool(pool, Math.min(pool.length, 8));
+    if (ordered.length <= 4) return ordered.slice(0, 4);
+    const must = ordered.slice(0, 2);
+    const rest = ordered.slice(2);
+    let best = null;
+    for (let i = 0; i < rest.length; i++) {
+      for (let j = i + 1; j < rest.length; j++) {
+        const four = [...must, rest[i], rest[j]];
+        const r = splitScore(four, matchCtx);
+        const sc = r.s + Math.random() * 0.01; // 동점이면 무작위
+        if (!best || sc < best.sc) best = { sc, four };
+      }
+    }
+    return best ? best.four : ordered.slice(0, 4);
+  }
   function updateBenchedAfterPick(pool, pickedIds) {
     const newBenched = pool.map((p) => p.id).filter((id) => !pickedIds.includes(id));
     persistMatchSettings({ benched: newBenched });
@@ -1649,7 +1688,7 @@ function App() {
   // (예: 이번엔 1-4위/5-8위, 다음엔 2-5위/6-9위 ... 이렇게 밀리다 보면 1위와 8위가 한 그룹이 될 수도 있는데,
   //  그때도 팀은 실력 차가 가장 적은 조합으로 갈라서 항상 공평하게 만들어요.)
   function pickFourForCourt() {
-    if (matchMode !== "skill") return pickFromPool(waitingPlayers, 4);
+    if (matchMode !== "skill") return pickBalancedFour(waitingPlayers);
     const byRank = [...waitingPlayers].sort((a, b) => skillOf(b.id) - skillOf(a.id));
     const n = byRank.length;
     if (n < 4) return byRank;
@@ -1762,7 +1801,7 @@ function App() {
         }
         // 방금 게임에 못 들어가고 밀린 사람은 이번엔 반드시 포함, 나머지는 랜덤으로 채워요.
         // 팀을 나눌 때는 최근 파트너/상대 겹침을 피하는 쪽으로 똑똑하게 골라요.
-        const four = pickFromPool(pool, 4);
+        const four = pickBalancedFour(pool);
         const { a, b } = splitScore(four, matchCtx);
         const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
         const next = { ...current, [courtNum]: match };
@@ -1951,7 +1990,7 @@ function App() {
         const pool = players.filter((p) => !occupied.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
         let four;
         if (pool.length >= 4) {
-          four = pickFromPool(pool, 4);
+          four = pickBalancedFour(pool);
         } else if (allowPartial && pool.length >= 1) {
           // 대기 인원이 4명이 안 될 땐(예: 13명인데 3코트), 대기 중인 사람은 무조건 넣고 모자란 자리는 지금 이 코트에서 뛰는 사람들로 채워요.
           // 어차피 경기가 끝나면 "방금 끝난 사람 + 대기자" 중에서 4명을 고르게 되는 것과 같은 결과를 미리 보여주는 거예요.
