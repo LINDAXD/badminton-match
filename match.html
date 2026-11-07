@@ -1093,6 +1093,12 @@ function App() {
     return Math.max(0, Math.min(1, (raw - 700) / 600));
   }
 
+  // 관리자 화면에서만: 이름 옆에 매칭에 쓰는 실력 점수(등록 레벨 + 승패 반영)를 작게 보여줘요
+  function scoreTag(id) {
+    if (!adminOn) return null;
+    return <span className="text-[10px] font-normal text-stone-400 ml-1">{Math.round(700 + skillOf(id) * 600)}</span>;
+  }
+
   const tierBadge = { 상: { emoji: "🔥", color: "text-red-500" }, 중: { emoji: "➖", color: "text-stone-400" }, 하: { emoji: "🌱", color: "text-green-600" } };
 
   // 관리자가 개인 전적을 직접 원하는 값으로 고쳐요 (실제 경기기록은 그대로 두고, 보정값만 얹어요)
@@ -4227,13 +4233,13 @@ function App() {
                     <div className="grid grid-cols-2 gap-2 px-4 py-4">
                       <div className={`bc-team-a rounded-xl p-3 ${aWinDone ? "ring-2 ring-offset-1" : ""}`} style={aWinDone ? { "--tw-ring-color": "var(--bc-blue)" } : {}}>
                         <p className="bc-team-label-a text-[10px] font-bold tracking-widest mb-2 flex items-center gap-1">🔵 A팀 {aWinDone && <span>🏆</span>}</p>
-                        <p className="text-sm font-semibold leading-tight truncate mb-1">{m.teamA[0].name}{m.captainId === m.teamA[0].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
-                        <p className="text-sm font-semibold leading-tight truncate">{m.teamA[1].name}{m.captainId === m.teamA[1].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
+                        <p className="text-sm font-semibold leading-tight truncate mb-1">{m.teamA[0].name}{scoreTag(m.teamA[0].id)}{m.captainId === m.teamA[0].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
+                        <p className="text-sm font-semibold leading-tight truncate">{m.teamA[1].name}{scoreTag(m.teamA[1].id)}{m.captainId === m.teamA[1].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
                       </div>
                       <div className={`bc-team-b rounded-xl p-3 ${bWinDone ? "ring-2 ring-offset-1" : ""}`} style={bWinDone ? { "--tw-ring-color": "var(--bc-orange)" } : {}}>
                         <p className="bc-team-label-b text-[10px] font-bold tracking-widest mb-2 flex items-center gap-1">🟠 B팀 {bWinDone && <span>🏆</span>}</p>
-                        <p className="text-sm font-semibold leading-tight truncate mb-1">{m.teamB[0].name}{m.captainId === m.teamB[0].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
-                        <p className="text-sm font-semibold leading-tight truncate">{m.teamB[1].name}{m.captainId === m.teamB[1].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
+                        <p className="text-sm font-semibold leading-tight truncate mb-1">{m.teamB[0].name}{scoreTag(m.teamB[0].id)}{m.captainId === m.teamB[0].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
+                        <p className="text-sm font-semibold leading-tight truncate">{m.teamB[1].name}{scoreTag(m.teamB[1].id)}{m.captainId === m.teamB[1].id && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>🖊️ 기록담당</span>}</p>
                       </div>
                     </div>
                     <p className="text-center text-[10px] text-stone-400 -mt-2 mb-1">VS</p>
