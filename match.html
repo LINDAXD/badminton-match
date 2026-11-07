@@ -4173,10 +4173,11 @@ function App() {
                     {m && m.done && <span className="bc-badge2 bc-badge2-done">종료</span>}
                     {m && !m.done && <span className="bc-badge2 bc-badge2-playing">🟢 경기중</span>}
                     {!m && <span className="bc-badge2 bc-badge2-empty">비어있음</span>}
-                    {adminOn && (
-                      <button onClick={() => toggleCourtLock(courtNum)} className="text-white/80 text-[10px] normal-case tracking-normal underline underline-offset-2">
-                        {lockedCourts.includes(courtNum) ? "잠금해제" : "잠그기"}
-                      </button>
+                    {adminOn && lockedCourts.includes(courtNum) && (
+                      <button onClick={() => toggleCourtLock(courtNum)} className="text-white/80 text-[10px] normal-case tracking-normal underline underline-offset-2">잠금해제</button>
+                    )}
+                    {adminOn && !lockedCourts.includes(courtNum) && courtNum <= numCourts && numCourts > 1 && (
+                      <button onClick={() => changeCourtCount(numCourts - 1)} className="text-white/80 text-[10px] normal-case tracking-normal underline underline-offset-2">코트 닫기</button>
                     )}
                   </div>
                 </div>
