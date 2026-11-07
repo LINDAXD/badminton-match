@@ -15,6 +15,10 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="./firebase.js"></script>
+<style>
+  /* 폰에서 버튼(참석 칩 등)을 길게 눌렀을 때 글자 선택창이 뜨거나, 탭이 한 번에 안 먹히는 걸 막아요 */
+  button, [role="button"] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+</style>
 </head>
 <body>
 <div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#B0B0B0;font-family:sans-serif;font-size:13px;">🏸 불러오는 중...</div></div>
@@ -39,7 +43,7 @@ function bump(map, key) {
 // score a single 4-person court split
 // ctx: { hist, skillOf, mode, todayPairCount, isFirstTimer, isKindOrStrong }
 function splitScore(four, ctx, excludeKey) {
-  const { hist, skillOf, mode = "balance", todayPairCount, isFirstTimer, isKindOrStrong } = ctx || {};
+  const { hist, skillOf, mode = "balance", todayPairCount, partnerToday, isFirstTimer, isKindOrStrong } = ctx || {};
 
   // 🎲 랜덤 모드: 아무 계산 없이 완전 무작위로 팀을 갈라요 (제외할 조합이 있으면 그것만 빼고 골라요)
   if (mode === "random") {
@@ -92,15 +96,24 @@ function splitScore(four, ctx, excludeKey) {
       });
     }
 
+    // 2-b) 오늘 이미 같은 팀(파트너)이었던 사람끼리는 "어쩔 수 없을 때만" 다시 묶어요.
+    // 다른 조합이 하나라도 있으면 그쪽이 무조건 뽑히도록 아주 크게 감점해요.
+    let repeatPartner = 0;
+    if (partnerToday) {
+      [a, b].forEach((team) => { repeatPartner += partnerToday(team[0].id, team[1].id); });
+    }
+    const repeatPenalty = repeatPartner * 5000;
+
     // 3) 실력 밸런스 — 모드에 따라 가중치가 달라져요 (친목 모드는 실력 거의 신경 안 씀)
     const skillA = skillOf ? (skillOf(a[0].id) + skillOf(a[1].id)) / 2 : 0;
     const skillB = skillOf ? (skillOf(b[0].id) + skillOf(b[1].id)) / 2 : 0;
     const skillGap = Math.abs(skillA - skillB);
     const skillWeight = mode === "skill" ? 40 : mode === "social" ? 1 : 24;
     let skillScore = skillGap * skillWeight;
-    // 두 팀 실력 차가 눈에 띄게 벌어지는 조합(예: 제일 잘하는 두 명이 한 팀)은 추가로 크게 감점해서, 다른 조합이 있으면 거의 안 뽑히게 해요.
+    // 두 팀 실력 차가 눈에 띄게 벌어지는 조합(예: 제일 잘하는 두 명이 한 팀, 보통+보통 vs 잘함+못함이 아니라 잘함+잘함 vs 못함+못함)은 아주 크게 감점해서
+    // "보통+보통 / 잘함+못함"처럼 두 팀 합이 비슷한 조합만 뽑히게 해요.
     // (같이 친 기록이 아주 많이 쌓여서 중복 감점이 더 커지는 경우가 아니면 이 규칙이 우선이에요.)
-    if (mode !== "social" && skillGap > 0.15) skillScore += (skillGap - 0.15) * 100;
+    if (mode !== "social" && skillGap > 0.12) skillScore += (skillGap - 0.12) * 20000;
 
     // 4) 균형 모드에서는 왕초보/초보끼리만 뭉치지 않도록, 팀 내부 실력차가 "적당히" 섞이는 조합을 살짝 선호
     let mixBonus = 0;
@@ -130,8 +143,8 @@ function splitScore(four, ctx, excludeKey) {
       });
     }
 
-    const s = historyScore + todayPenalty + skillScore + mixBonus + firstTimerBonus + weakPairPenalty;
-    if (!best || s < best.s) best = { s, a, b };
+    const s = historyScore + todayPenalty + skillScore + mixBonus + firstTimerBonus + weakPairPenalty + repeatPenalty;
+    if (!best || s < best.s) best = { s, a, b, repeats: repeatPartner, gap: skillGap };
   }
   return best;
 }
@@ -148,13 +161,18 @@ function shuffleArray(arr) {
   return a;
 }
 
-function generateRound(players, numCourts, hist, restIds = new Set(), skillOf = null) {
+function generateRound(players, numCourts, hist, restIds = new Set(), skillOf = null, tp = null) {
   const forcedRest = players.filter((p) => restIds.has(p.id));
   const pool = players.filter((p) => !restIds.has(p.id));
 
   const need = numCourts * 4;
+  // 누가 뛸지: ① 이미 2연속으로 뛴 사람(또 뛰면 3연속)은 맨 뒤 ② 방금 뛴 사람(연속)은 쉰 사람 뒤 ③ 적게 친 사람 먼저 ④ 같으면 무작위
   const sorted = [...pool].sort(
-    (a, b) => a.gamesPlayed - b.gamesPlayed || Math.random() - 0.5
+    (a, b) =>
+      (a.streak >= 2 ? 1 : 0) - (b.streak >= 2 ? 1 : 0) ||
+      (a.streak >= 1 ? 1 : 0) - (b.streak >= 1 ? 1 : 0) ||
+      a.gamesPlayed - b.gamesPlayed ||
+      Math.random() - 0.5
   );
   const playing = sorted.slice(0, need);
   const usable = playing.slice(0, Math.floor(playing.length / 4) * 4);
@@ -173,13 +191,13 @@ function generateRound(players, numCourts, hist, restIds = new Set(), skillOf = 
   }
   let bestAssignment = null;
   let bestTotal = Infinity;
-  for (let t = 0; t < 60; t++) {
+  for (let t = 0; t < 120; t++) {
     const shuffled = t % 4 === 3 ? shuffleArray(usable) : mixedGrouping();
     let total = 0;
     const courts = [];
     for (let i = 0; i < shuffled.length; i += 4) {
       const four = shuffled.slice(i, i + 4);
-      const { s, a, b } = splitScore(four, { hist, skillOf, mode: "balance", todayPairCount: () => 0, isFirstTimer: () => false, isKindOrStrong: () => false });
+      const { s, a, b } = splitScore(four, { hist, skillOf, mode: "balance", todayPairCount: () => 0, partnerToday: tp ? (x, y) => tp[pKey(x, y)] || 0 : undefined, isFirstTimer: () => false, isKindOrStrong: () => false });
       total += s;
       courts.push({ teamA: a, teamB: b });
     }
@@ -534,6 +552,9 @@ function App() {
     }
   });
   const [players, setPlayers] = useState([]);
+  const [matchView, setMatchView] = useState("auto"); // auto | friendly
+  const [attendOpen, setAttendOpen] = useState(true);
+  const [attendQ, setAttendQ] = useState("");
   const [roster, setRoster] = useState([]);
   const [rosterReady, setRosterReady] = useState(false);
   const [manageMode, setManageMode] = useState(false);
@@ -568,6 +589,7 @@ function App() {
   const [hist, setHist] = useState(buildHistory());
   const [courtMatches, setCourtMatches] = useState({}); // { [courtNumber]: match | null }
   const [matchSeq, setMatchSeq] = useState(0);
+  const localFinishedRef = useRef([]); // 이 화면에서 방금 끝낸 경기들의 선수 id 목록 (최근 것이 앞) — 대기 순서 계산용
   const [history, setHistory] = useState([]);
   const [syncMsg, setSyncMsg] = useState("");
   const [rsvp, setRsvp] = useState({});
@@ -763,25 +785,29 @@ function App() {
     n = Math.max(1, n);
     if (n === numCourts) return;
     let keptMsg = "";
+    let rematch = false;
     if (n < numCourts) {
-      const extra = Object.entries(courtMatches).filter(([cn, m]) => Number(cn) > n && m && !m.done && m.date === todayStr() && !m.friendly);
-      const unscored = extra.filter(([, m]) => isUnscoredMatch(m)).map(([cn]) => cn);
-      const kept = extra.filter(([, m]) => !isUnscoredMatch(m)).map(([cn]) => cn);
+      // 코트를 줄이면 "점수 입력 전" 경기는 전부 초기화하고, 줄인 코트 수 기준으로 새로 매칭해요.
+      // (점수가 이미 들어간 경기는 건드리지 않고, 줄어서 없어지는 코트면 끝날 때까지만 남겨요)
+      const active = Object.entries(courtMatches).filter(([cn, m]) => m && !m.done && m.date === todayStr() && !m.friendly && !isNaN(Number(cn)));
+      const unscored = active.filter(([, m]) => isUnscoredMatch(m));
+      const kept = active.filter(([cn, m]) => !isUnscoredMatch(m) && Number(cn) > n).map(([cn]) => cn);
       if (unscored.length > 0) {
-        const ok = await appConfirm(`코트를 ${n}면으로 줄이면 ${unscored.join("·")}번 코트의 경기(아직 점수 입력 전)가 취소돼요.\n그 경기에 있던 사람들은 대기로 돌아가요.\n\n확인 = 취소하고 ${n}면으로 줄이기\n취소 = 코트 수 그대로`);
+        const ok = await appConfirm(`코트를 ${n}면으로 줄이면 지금 점수 입력 전인 경기 ${unscored.length}개를 모두 초기화하고, ${n}면 기준으로 새로 매칭해요.\n(점수가 이미 들어간 경기는 그대로 둬요)\n\n확인 = 초기화하고 새로 매칭\n취소 = 코트 수 그대로`);
         if (!ok) return;
+        rematch = true;
       }
       if (kept.length > 0) keptMsg = `${kept.join("·")}번 코트는 점수가 이미 들어간 경기라서, 그 경기가 끝나면 사라져요.`;
-      if (extra.length > 0) {
+      if (active.length > 0) {
         try {
           await db.runTransaction(async (tx) => {
             const snap = await tx.get(REFS.courtmatches);
             const current = (snap.data() || {}).data || {};
             const cleaned = {};
             Object.entries(current).forEach(([cn, m]) => {
-              if (Number(cn) > n && m && !m.done && m.date === todayStr() && !m.friendly) {
+              if (m && !m.done && m.date === todayStr() && !m.friendly && !isNaN(Number(cn))) {
                 if (isUnscoredMatch(m)) return; // 점수 입력 전 경기는 비워요
-                if (m.next) { const { next: _n, ...rest } = m; cleaned[cn] = rest; return; }
+                if (m.next) { const { next: _n, ...rest } = m; cleaned[cn] = rest; return; } // 다음 경기 예약도 새로 짜요
               }
               cleaned[cn] = m;
             });
@@ -794,6 +820,15 @@ function App() {
       }
     }
     persistMatchSettings({ numCourts: n, numCourtsManual: true });
+    if (rematch) {
+      // 새 코트 수 기준으로 비어 있는(점수 든 경기가 없는) 코트에 바로 새로 매칭해요
+      const targets = Array.from({ length: n }, (_, i) => i + 1).filter((cn) => {
+        if (lockedCourts.includes(cn)) return false;
+        const cm = courtMatches[cn];
+        return !cm || cm.done || cm.date !== todayStr() || isUnscoredMatch(cm);
+      });
+      if (targets.length > 0) await startAllEmptyCourts(targets);
+    }
     if (keptMsg) appAlert(keptMsg);
   }
 
@@ -1216,10 +1251,28 @@ function App() {
   // 양방향 동기화: 일정에서 참석하면 매칭 참석자에 추가되고, 일정에서 취소하면 매칭 참석자에서도 빠져요
   // (단, 지금 경기 중인 사람은 경기 끝날 때까지는 그대로 두고, 다음부터 안 뽑히게만 해요 — 게스트는 이 로직 대상 아니에요)
   // 홈 화면이랑 똑같이 "일정 참석 + 체크인 기록"을 합쳐서 봐요 — 하나만 보면 홈이랑 인원수가 서로 달라 보일 수 있어서요.
+  // ⚠️ 참석 칩을 눌렀을 때 "방금 누른 상태"를 잠깐(서버에 반영될 때까지) 우선해요.
+  // 예전엔 누르는 순간 화면은 바뀌는데, 곧바로 아직 안 바뀐 일정/체크인 데이터로 다시 계산되면서 원래대로 되돌아가서
+  // 꾹 누르거나 여러 번 눌러야 했어요.
+  const pendingRsvpRef = useRef({});
   useEffect(() => {
     if (!roster.length) return;
     setPlayers((prev) => {
-      const todayAttendees = combinedTodayAttendees(schedule, checkinlog, roster);
+      const baseAttendees = combinedTodayAttendees(schedule, checkinlog, roster);
+      const pend = pendingRsvpRef.current;
+      const nowMs = Date.now();
+      const baseIds = new Set(baseAttendees.map((a) => a.id));
+      Object.keys(pend).forEach((id) => {
+        const want = pend[id].status === "in";
+        if (nowMs - pend[id].t > 10000 || baseIds.has(id) === want) delete pend[id]; // 서버가 따라잡았거나 오래됐으면 해제
+      });
+      let todayAttendees = baseAttendees.filter((a) => !(pend[a.id] && pend[a.id].status === "out"));
+      Object.keys(pend).forEach((id) => {
+        if (pend[id].status === "in" && !todayAttendees.some((a) => a.id === id)) {
+          const m = roster.find((r) => r.id === id);
+          if (m) todayAttendees = [...todayAttendees, { id: m.id, name: m.name }];
+        }
+      });
       const attendeeIds = new Set(todayAttendees.map((a) => a.id));
       const keptGuests = prev.filter((p) => String(p.id).startsWith("guest_"));
       const attendingMembers = todayAttendees.map((a) => {
@@ -1397,8 +1450,31 @@ function App() {
     purgeCancelledFromCourts(gone).finally(() => setTimeout(() => { purgeInFlight.current = false; }, 2500));
   }, [schedule, checkinlog, roster, courtMatches, players]);
 
+  // 다른 기기에서 "쉴래요/먼저 갈게요"를 눌렀거나, 예약(next)에 남아 있는 경우도 관리자 화면에서 정리해요
+  const restPullAt = useRef({});
+  useEffect(() => {
+    if (!adminOn || !players.length) return;
+    const off = new Set([...Object.keys(restWish || {}), ...Object.keys(leftEarly || {}), ...(excluded || [])]);
+    if (!off.size) return;
+    const inCourt = new Set();
+    Object.values(courtMatches || {}).forEach((m) => {
+      if (!m || m.done || m.date !== todayStr()) return;
+      [...m.teamA, ...m.teamB].forEach((p) => inCourt.add(p.id));
+      if (m.next) [...m.next.teamA, ...m.next.teamB].forEach((p) => inCourt.add(p.id));
+    });
+    const now = Date.now();
+    off.forEach((id) => {
+      if (!inCourt.has(id)) return;
+      if (now - (restPullAt.current[id] || 0) < 60000) return;
+      restPullAt.current[id] = now;
+      const p = players.find((x) => x.id === id);
+      pullFromLiveMatchIfPlaying(id, p ? p.name : "그 회원");
+    });
+  }, [courtMatches, restWish, leftEarly, excluded, players, adminOn]);
+
   function setMyRsvp(memberId, status) {
     try {
+      pendingRsvpRef.current[memberId] = { status, t: Date.now() };
       const next = { ...rsvp, [memberId]: status };
       setRsvp(next);
       CHECKIN_REF.set({ data: next }).catch((e) => appAlert("체크인 저장 실패: " + (e && e.message ? e.message : e)));
@@ -1445,23 +1521,49 @@ function App() {
         const snap = await tx.get(REFS.courtmatches);
         const data = snap.data() || {};
         const current = data.data || {};
-        const entry = Object.entries(current).find(
-          ([, m]) => m && !m.done && m.date === todayStr() && [...m.teamA, ...m.teamB].some((p) => p.id === memberId)
-        );
-        if (!entry) return { ok: true, pulled: false };
-        const [courtNum, m] = entry;
         const occupied = new Set();
         Object.values(current).forEach((cm) => {
           if (cm && !cm.done && cm.date === todayStr()) { [...cm.teamA, ...cm.teamB].forEach((p) => occupied.add(p.id)); if (cm.next) [...cm.next.teamA, ...cm.next.teamB].forEach((p) => occupied.add(p.id)); }
         });
-        const candidate = players.find(
-          (p) => !occupied.has(p.id) && p.id !== memberId && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id)
-        );
-        if (!candidate) return { ok: false, courtNum };
-        const swap = (team) => team.map((p) => (p.id === memberId ? { id: candidate.id, name: candidate.name } : p));
-        const nextMatch = { ...m, teamA: swap(m.teamA), teamB: swap(m.teamB) };
-        tx.set(REFS.courtmatches, { data: { ...current, [courtNum]: nextMatch } });
-        return { ok: true, pulled: true, courtNum, candidateName: candidate.name };
+        const pickCand = () => {
+          const c = players.find((p) => !occupied.has(p.id) && p.id !== memberId && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
+          if (c) occupied.add(c.id);
+          return c;
+        };
+        const has = (team) => team.some((p) => p.id === memberId);
+        const out = { ...current };
+        let result = { ok: true, pulled: false };
+        let changed = false;
+        Object.entries(current).forEach(([courtNum, m]) => {
+          if (!m || m.done || m.date !== todayStr()) return;
+          let nm = m;
+          if (has(m.teamA) || has(m.teamB)) {
+            const cand = pickCand();
+            if (cand) {
+              const swap = (team) => team.map((p) => (p.id === memberId ? { id: cand.id, name: cand.name } : p));
+              nm = { ...nm, teamA: swap(m.teamA), teamB: swap(m.teamB) };
+              result = { ok: true, pulled: true, courtNum, candidateName: cand.name };
+              changed = true;
+            } else {
+              result = { ok: false, courtNum };
+            }
+          }
+          if (nm.next && (has(nm.next.teamA) || has(nm.next.teamB))) {
+            const cand = pickCand();
+            const rest = { ...nm };
+            if (cand) {
+              const swap = (team) => team.map((p) => (p.id === memberId ? { id: cand.id, name: cand.name } : p));
+              rest.next = { ...nm.next, teamA: swap(nm.next.teamA), teamB: swap(nm.next.teamB) };
+            } else {
+              delete rest.next;
+            }
+            nm = rest;
+            changed = true;
+          }
+          out[courtNum] = nm;
+        });
+        if (changed) tx.set(REFS.courtmatches, { data: out });
+        return result;
       }).then((result) => {
         if (result && result.pulled) {
           const place = String(result.courtNum).startsWith("friendly") ? "친선전" : `${result.courtNum}코트`;
@@ -1647,23 +1749,29 @@ function App() {
   function buildPreview() {
     const base = players.filter((p) => !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
     if (base.length < 4) { setPreviewData([]); return; }
-    let sim = base.map((p) => ({ ...p, gamesPlayed: p.gamesPlayed || 0 })); // 오늘 이미 친 판수를 반영해서, 결과가 쌓일수록 그만큼 쉬던 사람이 먼저 들어가요
+    // 오늘 이미 친 판수 + 지금 연속으로 몇 판째 뛰는 중인지(streak)를 반영해요 — 결과가 쌓일수록 쉬던 사람이 먼저 들어가고, 3연속은 안 나와요
+    const ri0 = roundInfo();
+    let sim = base.map((p) => ({ ...p, gamesPlayed: p.gamesPlayed || 0, streak: streakCls(ri0, p.id) }));
+    let tp = todayPartnerMap(); // 오늘 같은 팀이었던 횟수 (미리보기 라운드끼리도 계속 쌓아요)
     let h = { partner: { ...hist.partner }, opponent: { ...hist.opponent } };
     const courts = Math.max(1, Math.min(numCourts, Math.floor(sim.length / 4)));
     const rounds = [];
     for (let i = 0; i < previewRounds; i++) {
-      const { matches, resting } = generateRound(sim, courts, h, new Set(), skillOf);
+      const { matches, resting } = generateRound(sim, courts, h, new Set(), skillOf, tp);
       rounds.push({ matches, resting });
       const nh = { partner: { ...h.partner }, opponent: { ...h.opponent } };
       const playedIds = new Set();
       matches.forEach((m) => {
         bump(nh.partner, pKey(m.teamA[0].id, m.teamA[1].id));
         bump(nh.partner, pKey(m.teamB[0].id, m.teamB[1].id));
+        tp = { ...tp };
+        bump(tp, pKey(m.teamA[0].id, m.teamA[1].id));
+        bump(tp, pKey(m.teamB[0].id, m.teamB[1].id));
         m.teamA.forEach((a) => m.teamB.forEach((b) => bump(nh.opponent, pKey(a.id, b.id))));
         [...m.teamA, ...m.teamB].forEach((p) => playedIds.add(p.id));
       });
       h = nh;
-      sim = sim.map((p) => (playedIds.has(p.id) ? { ...p, gamesPlayed: p.gamesPlayed + 1 } : p));
+      sim = sim.map((p) => (playedIds.has(p.id) ? { ...p, gamesPlayed: p.gamesPlayed + 1, streak: (p.streak || 0) + 1 } : { ...p, streak: 0 }));
     }
     setPreviewData(rounds);
   }
@@ -1689,12 +1797,18 @@ function App() {
   // 대기 중(체크인 했지만 지금 안 뛰고 있는) 선수들 — 방금 밀려서 확정된 사람(benched) 먼저, 나머지는 이름순
   // ⚠️ 이 목록은 "다음 매칭에 실제로 뽑힐 수 있는 후보"예요. 쉬고 싶다는 사람(restWish)/먼저 간 사람(leftEarly)은
   // 절대 여기 포함되면 안 돼요 — 매칭 함수들이 전부 이 목록을 그대로 써서 코트를 채우기 때문이에요.
+  const _ago = agoMap();
+  const _ri = roundInfo();
   const waitingPlayers = players
     .filter((p) => !occupiedIds.has(p.id) && !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id))
     .sort((a, b) => {
-      const ba = benched.includes(a.id) ? 0 : 1;
-      const bb = benched.includes(b.id) ? 0 : 1;
-      if (ba !== bb) return ba - bb;
+      // 오래 쉰 사람이 앞 (오늘 한 번도 안 뛴 사람이 맨 앞), 방금 뛴 사람이 맨 뒤, 같으면 이름순
+      const ka = a.id in _ago ? _ago[a.id] : 9999;
+      const kb = b.id in _ago ? _ago[b.id] : 9999;
+      const ca = streakCls(_ri, a.id);
+      const cb = streakCls(_ri, b.id);
+      if (ca !== cb) return ca - cb;
+      if (ka !== kb) return kb - ka;
       return a.name.localeCompare(b.name, "ko");
     });
 
@@ -1728,7 +1842,8 @@ function App() {
     .filter((p) => !occupiedIds.has(p.id))
     .sort((a, b) => a.name.localeCompare(b.name, "ko"));
 
-  const matchCtx = { hist, skillOf, mode: matchMode, todayPairCount, isFirstTimer, isKindOrStrong };
+  const _partnerMap = todayPartnerMap();
+  const matchCtx = { hist, skillOf, mode: matchMode, todayPairCount, partnerToday: (x, y) => _partnerMap[pKey(x, y)] || 0, isFirstTimer, isKindOrStrong };
 
   // 대기 시간 대신: "방금 게임에 못 들어간 사람"을 다음 매칭에서 반드시 우선 배정하고, 나머지는 랜덤으로 뽑아요.
   function shuffleArr(arr) {
@@ -1748,34 +1863,118 @@ function App() {
   // 많거나 같으면 그 사람들로만 꽉 차버려서 방금 경기 끝난 사람들이랑 영영 안 섞이는 문제가 있었어요
   // (인원이 딱 코트 수의 배수일 때 두 그룹이 계속 자리만 바꿔가며 서로 안 섞이는 현상). 그래서 밀린 사람은
   // 최대 need의 절반까지만 확정으로 넣고, 나머지 자리는 남은 밀린 사람까지 합쳐서 무작위로 섞어요.
+  // ⏱ 매칭 우선순위: ① 3연속 금지 ② 연속(방금 뛴 사람)은 어쩔 수 없을 때만 ③ 오래 쉰 사람 먼저 ④ 그 안에서 같은 팀 반복 없이, 팀 실력 차이가 작게.
+  // 오늘 끝난 경기 목록 (최근 것이 앞). 서버 기록(matchhistory)은 저장이 조금 늦게 반영되니까, 이 화면에서 방금 끝낸 경기(localFinishedRef)도 같이 봐요.
+  function todayGames() {
+    const today = todayStr();
+    const gk = (court, ids) => `${court}|${[...ids].sort().join(",")}`;
+    const persisted = matchhistory
+      .filter((m) => m.date === today && !m.friendly)
+      .map((m) => ({ court: m.court, startedAt: m.startedAt || null, teamA: (m.teamA || []).map((p) => p.id), teamB: (m.teamB || []).map((p) => p.id) }));
+    const recentKeys = new Set(persisted.slice(0, 6).map((g) => gk(g.court, [...g.teamA, ...g.teamB])));
+    const pending = localFinishedRef.current.filter((g) => g.date === today && !recentKeys.has(gk(g.court, [...g.teamA, ...g.teamB])));
+    return [...pending, ...persisted];
+  }
+  // 각자 "마지막으로 뛴 게 몇 게임 전인지(ago, 끝난 순서 기준)" — 클수록 오래 쉼
+  function agoMap() {
+    const ago = {};
+    todayGames().forEach((g, i) => [...g.teamA, ...g.teamB].forEach((id) => { if (ago[id] === undefined) ago[id] = i; }));
+    return ago;
+  }
+  // 오늘 시작된 모든 경기(끝난 것 + 진행 중)를 "시작 순서"로 줄 세우고, 코트 수만큼을 한 라운드로 묶어요.
+  // 그래서 "직전 라운드에도 뛰었는지 / 그 전 라운드에도 뛰었는지"를 알 수 있어요 (연속 2번, 3번 계산).
+  function roundInfo() {
+    const nc = Math.max(1, numCourts);
+    const fin = todayGames();
+    const act = Object.values(courtMatches)
+      .filter((m) => m && !m.done && m.date === todayStr() && !m.friendly)
+      .map((m) => ({ teamA: m.teamA.map((p) => p.id), teamB: m.teamB.map((p) => p.id), startedAt: m.startedAt || null }));
+    const legacy = [...fin].reverse().filter((g) => !g.startedAt); // 시작 시각이 없는 옛 기록은 끝난 순서대로 맨 앞에
+    const timed = [...fin, ...act].filter((g) => g.startedAt).sort((x, y) => x.startedAt - y.startedAt);
+    const legacyAct = act.filter((g) => !g.startedAt);
+    const all = [...legacy, ...timed, ...legacyAct];
+    const rounds = {};
+    all.forEach((g, i) => {
+      const r = Math.floor(i / nc);
+      [...g.teamA, ...g.teamB].forEach((id) => { (rounds[id] = rounds[id] || new Set()).add(r); });
+    });
+    return { rounds, curRound: Math.floor(all.length / nc) };
+  }
+  // 0 = 직전 라운드에 쉬었음 / 1 = 직전 라운드에 뛰었음(또 뛰면 2연속) / 2 = 직전 2라운드 연속으로 뛰었음(또 뛰면 3연속 → 사실상 금지)
+  function streakCls(ri, id) {
+    const st = ri.rounds[id];
+    if (!st) return 0;
+    if (st.has(ri.curRound - 1) && st.has(ri.curRound - 2)) return 2;
+    if (st.has(ri.curRound - 1)) return 1;
+    return 0;
+  }
+  // 오늘 같은 팀(파트너)이었던 횟수 — 끝난 경기 + 지금 진행 중/예약된 경기까지
+  function todayPartnerMap() {
+    const map = {};
+    const today = todayStr();
+    const addTeams = (A, B) => [A, B].forEach((t) => { if (t && t.length === 2) bump(map, pKey(t[0].id || t[0], t[1].id || t[1])); });
+    todayGames().forEach((g) => addTeams(g.teamA, g.teamB));
+    Object.values(courtMatches).forEach((m) => {
+      if (m && !m.done && m.date === today && !m.friendly) {
+        addTeams(m.teamA, m.teamB);
+        if (m.next) addTeams(m.next.teamA, m.next.teamB);
+      }
+    });
+    return map;
+  }
+  // 대기 순서로 줄 세우기. cls: 0=쉬었음, 1=직전 라운드에 뛰었음(또 뛰면 연속), 2=이미 2연속(또 뛰면 3연속 → 사실상 금지)
+  function waitRank(pool) {
+    const ago = agoMap();
+    const ri = roundInfo();
+    const info = {};
+    pool.forEach((p) => {
+      info[p.id] = { a: ago[p.id] === undefined ? 9999 : ago[p.id], cls: streakCls(ri, p.id) };
+    });
+    const list = shuffleArr(pool).sort((x, y) => info[x.id].cls - info[y.id].cls || info[y.id].a - info[x.id].a);
+    const tier = {};
+    let t = -1, last = null;
+    list.forEach((p) => {
+      const k = info[p.id].cls + ":" + info[p.id].a;
+      if (k !== last) { t++; last = k; }
+      tier[p.id] = t;
+    });
+    return { list, info, tier };
+  }
+  function combosOf(arr, k) {
+    const out = [];
+    const rec = (s, cur) => {
+      if (cur.length === k) { out.push(cur.slice()); return; }
+      for (let i = s; i < arr.length; i++) { cur.push(arr[i]); rec(i + 1, cur); cur.pop(); }
+    };
+    rec(0, []);
+    return out;
+  }
   function pickFromPool(pool, need) {
-    const benchedPool = shuffleArr(pool.filter((p) => benched.includes(p.id)));
-    const restPool = shuffleArr(pool.filter((p) => !benched.includes(p.id)));
-    const guaranteedCount = Math.min(benchedPool.length, Math.max(1, Math.ceil(need / 2)));
-    const guaranteed = benchedPool.slice(0, guaranteedCount);
-    const mixedRest = shuffleArr([...benchedPool.slice(guaranteedCount), ...restPool]);
-    return [...guaranteed, ...mixedRest].slice(0, need);
+    return waitRank(pool).list.slice(0, need);
   }
   // 4명 뽑기 — 대기 오래된(밀린) 사람 2명은 반드시 넣고, 나머지 2자리는 후보 중에서
   // "두 팀 실력이 가장 비슷하게 나눠지고, 최근에 같이 친 사람과 안 겹치는" 조합으로 골라요.
   // 그러면 매번 못하는 사람끼리/잘하는 사람끼리 몰리지 않고, 항상 비슷한 수준으로 섞여요 (순서 공평성은 그대로 유지).
   function pickBalancedFour(pool) {
-    const ordered = pickFromPool(pool, Math.min(pool.length, 8));
-    if (ordered.length <= 4) return ordered.slice(0, 4);
-    const must = ordered.slice(0, 2);
-    const rest = ordered.slice(2);
+    // 비용이 가장 작은 4명 조합을 골라요 (후보는 대기 순서 앞쪽 12명).
+    //  - 3연속(cls 2)은 사실상 금지, 연속(cls 1)은 큰 감점 → 어쩔 수 없을 때만
+    //  - 더 오래 기다린 사람이 있으면 그 사람이 먼저 (대기 순서 한 단계 뒤질 때마다 감점)
+    //  - 그 안에서: 오늘 같은 팀이었던 사람 반복은 아주 큰 감점, 두 팀 실력 차이가 벌어지면 감점 (splitScore)
+    const { list, info, tier } = waitRank(pool);
+    if (list.length <= 4) return list.slice(0, 4);
+    const cand = list.slice(0, Math.min(list.length, 12));
+    const STEP = 10;
+    const CLS = [0, 4500, 100000];
     let best = null;
-    for (let i = 0; i < rest.length; i++) {
-      for (let j = i + 1; j < rest.length; j++) {
-        const four = [...must, rest[i], rest[j]];
-        const r = splitScore(four, matchCtx);
-        const sc = r.s + Math.random() * 0.01; // 동점이면 무작위
-        if (!best || sc < best.sc) best = { sc, four };
-      }
-    }
-    return best ? best.four : ordered.slice(0, 4);
+    combosOf(cand, 4).forEach((four) => {
+      const r = splitScore(four, matchCtx);
+      const waitCost = four.reduce((sum, p) => sum + tier[p.id] * STEP + CLS[info[p.id].cls], 0);
+      const cost = r.s + waitCost + Math.random() * 0.01;
+      if (!best || cost < best.cost) best = { cost, four };
+    });
+    return best ? best.four : list.slice(0, 4);
   }
-  function updateBenchedAfterPick(pool, pickedIds) {
+    function updateBenchedAfterPick(pool, pickedIds) {
     const newBenched = pool.map((p) => p.id).filter((id) => !pickedIds.includes(id));
     persistMatchSettings({ benched: newBenched });
   }
@@ -1943,7 +2142,7 @@ function App() {
         // 팀을 나눌 때는 최근 파트너/상대 겹침을 피하는 쪽으로 똑똑하게 골라요.
         const four = pickBalancedFour(pool);
         const { a, b } = splitScore(four, matchCtx);
-        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
+        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), startedAt: Date.now(), captainId: pickCaptain(a, b) };
         const next = { ...current, [courtNum]: match };
         tx.set(REFS.courtmatches, { data: next });
         return { ok: true, pool, pickedIds: four.map((p) => p.id) };
@@ -2024,7 +2223,7 @@ function App() {
           return { ok: false, reason: "blocked" };
         }
         const q = queue[idx];
-        const match = { id: uid(), court: courtNum, teamA: q.teamA, teamB: q.teamB, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(q.teamA, q.teamB), planned: true };
+        const match = { id: uid(), court: courtNum, teamA: q.teamA, teamB: q.teamB, scoreA: "", scoreB: "", done: false, date: todayStr(), startedAt: Date.now(), captainId: pickCaptain(q.teamA, q.teamB), planned: true };
         queue.splice(idx, 1);
         tx.set(REFS.courtmatches, { data: { ...current, [courtNum]: match } });
         tx.set(PLAN_REF, { ...planData, queue });
@@ -2231,12 +2430,9 @@ function App() {
         let four;
         if (pool.length >= 4) {
           four = pickBalancedFour(pool);
-        } else if (allowPartial && pool.length >= 1) {
-          // 대기 인원이 4명이 안 될 땐(예: 13명인데 3코트), 대기 중인 사람은 무조건 넣고 모자란 자리는 지금 이 코트에서 뛰는 사람들로 채워요.
-          // 어차피 경기가 끝나면 "방금 끝난 사람 + 대기자" 중에서 4명을 고르게 되는 것과 같은 결과를 미리 보여주는 거예요.
-          const mine = shuffleArr([...cur.teamA, ...cur.teamB]).slice(0, 4 - pool.length);
-          four = [...pool, ...mine];
         } else {
+          // 대기 인원이 4명이 안 되면 "다음 경기"를 미리 못 정해요. 지금 뛰는 사람을 연속으로 또 넣지 않기 위해서예요.
+          // (그 코트 경기가 끝나면, 그때 대기 오래된 사람부터 우선으로 4명이 정해져요)
           return { ok: false };
         }
         const { a, b } = splitScore(four, matchCtx);
@@ -2294,9 +2490,9 @@ function App() {
   const [resultsSearch, setResultsSearch] = useState(""); // 경기결과 탭 이름 검색
   const [rankSearch, setRankSearch] = useState(""); // 랭킹 탭 - 내 순위 찾기 검색
   const [batchDoneMsg, setBatchDoneMsg] = useState("");
-  async function startAllEmptyCourts() {
+  async function startAllEmptyCourts(targetsOverride) {
     if (batchStarting) return;
-    const targets = [...emptyCourtNums];
+    const targets = Array.isArray(targetsOverride) ? [...targetsOverride] : [...emptyCourtNums];
     if (targets.length === 0) return;
     setBatchStarting(true);
     setBatchDoneMsg("");
@@ -2324,10 +2520,12 @@ function App() {
         const picked = chosen.slice(0, k * 4);
         let groups = courtsToFill.map(() => []);
         let bestTotal = Infinity;
-        for (let t = 0; t < 40; t++) {
+        for (let t = 0; t < 300; t++) {
           const bySkill = [...picked].sort((x, y) => skillOf(y.id) - skillOf(x.id));
           const quarters = [0, 1, 2, 3].map((q) => shuffleArr(bySkill.slice(q * k, (q + 1) * k)));
-          const trial = courtsToFill.map((_, i) => quarters.map((qr) => qr[i]));
+          // 대부분은 "실력 4등분 → 코트마다 한 명씩" 배치, 일부(3번에 1번)는 완전 무작위 배치도 시도해서 같은 팀 반복을 피할 길을 넓혀요
+          const sh = shuffleArr(picked);
+          const trial = t % 3 === 2 ? courtsToFill.map((_, i) => sh.slice(i * 4, i * 4 + 4)) : courtsToFill.map((_, i) => quarters.map((qr) => qr[i]));
           const total = trial.reduce((sum, four) => sum + splitScore(four, matchCtx).s, 0);
           if (total < bestTotal) { bestTotal = total; groups = trial; }
         }
@@ -2338,7 +2536,7 @@ function App() {
           const four = groups[i];
           if (four.length < 4) return;
           const { a, b } = splitScore(four, matchCtx);
-          nextCourts[courtNum] = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
+          nextCourts[courtNum] = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), startedAt: Date.now(), captainId: pickCaptain(a, b) };
           count++;
         });
         if (count === 0) return { ok: false, count: 0 };
@@ -2439,7 +2637,7 @@ function App() {
         });
         const conflict = four.find((p) => occupiedElsewhere.has(p.id));
         if (conflict) return { ok: false, conflictName: conflict.name };
-        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
+        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), startedAt: Date.now(), captainId: pickCaptain(a, b) };
         tx.set(REFS.courtmatches, { data: { ...current, [courtNum]: match } });
         return { ok: true };
       });
@@ -2515,7 +2713,7 @@ function App() {
         });
         const conflict = four.find((p) => occupiedElsewhere.has(p.id));
         if (conflict) return { ok: false, conflictName: conflict.name };
-        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: pickCaptain(a, b) };
+        const match = { id: uid(), court: courtNum, teamA: a, teamB: b, scoreA: "", scoreB: "", done: false, date: todayStr(), startedAt: Date.now(), captainId: pickCaptain(a, b) };
         const next = { ...current, [courtNum]: match };
         tx.set(REFS.courtmatches, { data: next });
         return { ok: true };
@@ -2759,6 +2957,7 @@ function App() {
     applySkillRatingUpdate(m, aWin).then((deltas) => {
       logMatchResult({
         round: matchSeq,
+        startedAt: m.startedAt || null, // 경기 시작 시각 — "연속으로 뛰는지" 계산에 써요
         court: m.court,
         time: new Date().toTimeString().slice(0, 5),
         teamA: m.teamA.map((p) => ({ id: p.id, name: p.name })),
@@ -2779,6 +2978,9 @@ function App() {
       hasScores, aWin,
     });
 
+    // 방금 뛴 사람 기록 (서버 기록이 반영되기 전에도 "연속으로 또 뛰지 않게" 대기 순서에 바로 반영해요)
+    localFinishedRef.current = [{ date: todayStr(), court: m.court, startedAt: m.startedAt || null, teamA: m.teamA.map((p) => p.id), teamB: m.teamB.map((p) => p.id) }, ...localFinishedRef.current].slice(0, 40);
+
     const finished = { ...m, done: true };
     delete finished.next;
     delete finished.winnerOverride;
@@ -2787,7 +2989,7 @@ function App() {
     // 미리 정해둔 "다음 경기"가 있으면, 끝나자마자 바로 그 매칭으로 시작해요. 없으면 예전처럼 빈 코트로 남아요.
     // (줄여서 없어진 코트라면 다음 경기를 거기서 시작하지 않고 그냥 비워요)
     const nextCourtState = (m.next && courtNum <= numCourts)
-      ? { id: uid(), court: courtNum, teamA: m.next.teamA, teamB: m.next.teamB, scoreA: "", scoreB: "", done: false, date: todayStr(), captainId: m.next.captainId || pickCaptain(m.next.teamA, m.next.teamB) }
+      ? { id: uid(), court: courtNum, teamA: m.next.teamA, teamB: m.next.teamB, scoreA: "", scoreB: "", done: false, date: todayStr(), startedAt: Date.now(), captainId: m.next.captainId || pickCaptain(m.next.teamA, m.next.teamB) }
       : finished;
     persistCourtMatches(courtNum, nextCourtState);
     setFinishingCourt(null);
@@ -3198,6 +3400,61 @@ function App() {
             )}
           </div>
 
+          {/* 참석 체크 — 이름만 눌러서 바로 참석/취소 (홈 탭 대신 여기서 해요) */}
+          <div className="bc-card p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-stone-800">✅ 오늘 참석 체크 <span className="text-xs font-normal text-stone-400">({players.length}명)</span></p>
+              <button onClick={() => setAttendOpen((v) => !v)} className="text-xs text-stone-400 underline underline-offset-2">{attendOpen ? "접기" : "펼치기"}</button>
+            </div>
+            {attendOpen && (
+              <>
+                <input
+                  value={attendQ}
+                  onChange={(e) => setAttendQ(e.target.value)}
+                  placeholder="🔎 이름 검색"
+                  className="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300"
+                />
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {roster.filter((r) => !attendQ.trim() || r.name.normalize("NFC").includes(attendQ.trim().normalize("NFC"))).map((r) => {
+                    const attending = players.some((p) => p.id === r.id);
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() => toggleAttend(r)}
+                        className="px-3 py-1.5 rounded-full text-sm border transition flex items-center gap-1"
+                        style={
+                          !attending
+                            ? { backgroundColor: "#fff", color: "#7C8494", borderColor: "var(--bc-line)" }
+                            : occupiedIds.has(r.id)
+                            ? { backgroundColor: "#DBEAFE", color: "#2563EB", borderColor: "#DBEAFE" }
+                            : { backgroundColor: "#DCFCE7", color: "#16A34A", borderColor: "#DCFCE7" }
+                        }
+                      >
+                        {attending && <span>{occupiedIds.has(r.id) ? "🔵" : "🟢"}</span>}
+                        {r.name}
+                      </button>
+                    );
+                  })}
+                  {roster.length === 0 && <p className="text-xs text-stone-400">등록된 멤버가 없어요.</p>}
+                </div>
+                <p className="text-[11px] text-stone-400 mt-2">누르면 참석, 다시 누르면 취소예요. 🟢 대기 · 🔵 경기 중</p>
+              </>
+            )}
+          </div>
+
+          <div className="flex rounded-xl border p-1 gap-1" style={{ borderColor: "var(--bc-line)", backgroundColor: "#F8FAFC" }}>
+            {[["auto", "🎲 자동매칭"], ["friendly", "🎈 친선"]].map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setMatchView(k)}
+                className="flex-1 rounded-lg py-2 text-sm font-semibold transition"
+                style={matchView === k ? { backgroundColor: "var(--bc-navy)", color: "#fff" } : { color: "#7C8494" }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {matchEndSummary && (() => {
             const liveMatch = courtMatches[matchEndSummary.court];
             const hasNext = liveMatch && !liveMatch.done && liveMatch.date === todayStr() && liveMatch.id !== matchEndSummary.matchId;
@@ -3606,6 +3863,7 @@ function App() {
             );
           })()}
 
+          {matchView === "auto" && (<>
           <div id="court-list" className="flex items-center justify-between pt-1 -mb-1">
             <p className="text-xs uppercase tracking-widest text-stone-400">🏟️ 전체 코트 현황 ({numCourts}면){(() => {
               const ex = Object.entries(courtMatches).filter(([cn, m]) => Number(cn) > numCourts && m && !m.done && m.date === todayStr()).map(([cn]) => cn);
@@ -3938,7 +4196,9 @@ function App() {
           });
           })()}
 
-          {(() => {
+          </>)}
+
+          {matchView === "friendly" && (() => {
             const slotKeys = Array.from({ length: friendlyCourts }, (_, i) => `friendly${i + 1}`);
             return (
               <div className="space-y-3">
