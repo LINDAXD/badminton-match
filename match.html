@@ -3378,6 +3378,42 @@ function App() {
 
       {tab === "attend" && (
         <section className="px-5 mt-5 space-y-4">
+          {/* 지금 코트 / 다음 코트 미리보기 — 다음 사람이 준비하도록 */}
+          {(() => {
+            const nums = new Set(Array.from({ length: numCourts }, (_, i) => String(i + 1)));
+            Object.entries(courtMatches).forEach(([cn, cm]) => { if (cm && !cm.done && cm.date === todayStr() && !cm.friendly && !isNaN(Number(cn))) nums.add(String(cn)); });
+            const list = [...nums].sort((a, b) => Number(a) - Number(b));
+            const names = (ts) => ts.map((p) => p.name).join(" · ");
+            const idleNext = waitingPlayers.slice(0, 4).map((p) => p.name).join(" · ");
+            return (
+              <div className="bc-card p-4">
+                <p className="text-sm font-bold text-stone-800 mb-2">🏟️ 지금 코트 · 다음 경기</p>
+                <div className="space-y-2">
+                  {list.map((cn) => {
+                    const cm = courtMatches[cn];
+                    const live = cm && !cm.done && cm.date === todayStr() ? cm : null;
+                    return (
+                      <div key={cn} className="rounded-xl border p-3" style={{ borderColor: "var(--bc-line)" }}>
+                        <p className="text-xs font-bold text-stone-500 mb-1">{cn}코트</p>
+                        {live ? (
+                          <p className="text-sm text-stone-800">🟢 <b>{names(live.teamA)}</b> <span className="text-stone-400">vs</span> <b>{names(live.teamB)}</b></p>
+                        ) : (
+                          <p className="text-sm text-stone-400">비어있음</p>
+                        )}
+                        {live && live.next ? (
+                          <p className="text-xs mt-1.5 rounded-lg px-2 py-1.5" style={{ backgroundColor: "#FEF9C3", color: "#854D0E" }}>⏭️ 다음 준비! {names(live.next.teamA)} vs {names(live.next.teamB)}</p>
+                        ) : (
+                          <p className="text-[11px] mt-1.5 text-stone-400">⏭️ 다음: 아직 안 정해졌어요</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {idleNext && <p className="text-xs mt-3 text-stone-500">⏳ 대기 순서 앞쪽: <b>{idleNext}</b></p>}
+              </div>
+            );
+          })()}
+
           {/* 참석 체크 — 이름만 눌러서 바로 참석/취소 (홈 탭 대신 여기서 해요) */}
           <div className="bc-card p-4">
             <div className="flex items-center justify-between">
