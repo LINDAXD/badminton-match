@@ -1919,16 +1919,26 @@ function App() {
         .map((p) => ({ ...p, gamesPlayed: (p.gamesPlayed || 0) + (nowIds.has(p.id) ? 1 : 0), streak: nowIds.has(p.id) ? streakCls(ri0, p.id) + 1 : streakCls(ri0, p.id) }));
       const nowCourt = {};
       live.forEach(([cn, c]) => { [...c.teamA, ...c.teamB].forEach((p) => { nowCourt[p.id] = String(cn); }); });
-      const used = new Set();
       const out = {};
-      // 코트마다: 대기자가 1순위, 모자라면 "그 코트에서 지금 뛰는 사람"으로 채워요 (다른 코트에서 아직 뛰는 사람은 안 넣어요 — 동시에 두 곳에 설 수 없으니까)
+      // 대기자가 1순위: 오래 기다린 순서로 (코트 수 × 4)명까지는 반드시 다음 게임에 넣어요.
+      // 대기자를 코트마다 고르게 나눠 담고(누가 어느 코트로 갈지는 섞어요), 모자란 자리는 "그 코트에서 지금 뛰는 사람"으로 채워요.
+      // (다른 코트에서 아직 뛰는 사람은 못 넣어요 — 동시에 두 곳에 설 수 없으니까)
+      const waitOrder = waitingPlayers.map((p) => p.id);
+      const waiters = sim.filter((p) => !nowCourt[p.id]).sort((x, y) => {
+        const ix = waitOrder.indexOf(x.id), iy = waitOrder.indexOf(y.id);
+        return (ix < 0 ? 999 : ix) - (iy < 0 ? 999 : iy);
+      }).slice(0, need.length * 4);
+      const shuffledWaiters = [...waiters].sort(() => Math.random() - 0.5);
+      const courtOrder = [...need].sort(() => Math.random() - 0.5);
+      const assigned = {};
+      need.forEach((cn) => { assigned[cn] = []; });
+      shuffledWaiters.forEach((p, i) => { assigned[courtOrder[i % courtOrder.length]].push(p); });
       need.forEach((cn) => {
-        const pool = sim.filter((p) => !used.has(p.id) && (!nowCourt[p.id] || nowCourt[p.id] === String(cn)));
+        const own = sim.filter((p) => nowCourt[p.id] === String(cn));
+        const pool = [...assigned[cn], ...own];
         if (pool.length < 4) return;
         const { matches } = generateRound(pool, 1, hist, new Set(), skillOf, todayPartnerMap());
-        if (!matches.length) return;
-        out[cn] = matches[0];
-        [...matches[0].teamA, ...matches[0].teamB].forEach((p) => used.add(p.id));
+        if (matches.length) out[cn] = matches[0];
       });
       return out;
     } catch (e) { return {}; }
