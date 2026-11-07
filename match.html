@@ -2054,7 +2054,13 @@ function App() {
     combosOf(cand, 4).forEach((four) => {
       const r = splitScore(four, matchCtx);
       const waitCost = four.reduce((sum, p) => sum + tier[p.id] * STEP + CLS[info[p.id].cls], 0);
-      const cost = r.s + waitCost + Math.random() * 0.01;
+      let spreadCost = 0;
+      if (matchMode === "skill") {
+        // 실력전: 네 명의 실력 차(가장 센 사람 - 가장 약한 사람)가 클수록 크게 감점 → 비슷한 수준끼리 한 코트에 모여요
+        const sk = four.map((p) => skillOf(p.id));
+        spreadCost = (Math.max(...sk) - Math.min(...sk)) * 800;
+      }
+      const cost = r.s + waitCost + spreadCost + Math.random() * 0.01;
       if (!best || cost < best.cost) best = { cost, four };
     });
     return best ? best.four : list.slice(0, 4);
@@ -2105,22 +2111,7 @@ function App() {
   // (예: 이번엔 1-4위/5-8위, 다음엔 2-5위/6-9위 ... 이렇게 밀리다 보면 1위와 8위가 한 그룹이 될 수도 있는데,
   //  그때도 팀은 실력 차가 가장 적은 조합으로 갈라서 항상 공평하게 만들어요.)
   function pickFourForCourt() {
-    if (matchMode !== "skill") return pickBalancedFour(waitingPlayers);
-    // 실력전도 "대기자 1순위"는 그대로 지켜요: 오래 기다린 순서(연속으로 뛴 사람은 뒤로) 앞쪽 8명 안에서,
-    // 가장 오래 기다린 사람이 꼭 들어가는 "실력이 비슷한 4명"을 골라요.
-    const n = waitingPlayers.length;
-    if (n < 4) return [...waitingPlayers];
-    const win = waitingPlayers.slice(0, Math.min(n, 8));
-    const byRank = [...win].sort((x, y) => skillOf(y.id) - skillOf(x.id));
-    const first = waitingPlayers[0];
-    const fi = byRank.findIndex((p) => p.id === first.id);
-    let best = null;
-    for (let s = Math.max(0, fi - 3); s <= Math.min(fi, byRank.length - 4); s++) {
-      const blk = byRank.slice(s, s + 4);
-      const spread = skillOf(blk[0].id) - skillOf(blk[3].id);
-      if (!best || spread < best.spread) best = { blk, spread };
-    }
-    const four = best ? best.blk : byRank.slice(0, 4);
+    const four = pickBalancedFour(waitingPlayers); // 실력전이면 pickBalancedFour 안에서 비슷한 실력끼리 모아요
     return four;
   }
 
@@ -2666,7 +2657,12 @@ function App() {
         const picked = chosen.slice(0, k * 4);
         let groups = courtsToFill.map(() => []);
         let bestTotal = Infinity;
-        for (let t = 0; t < 300; t++) {
+        if (matchMode === "skill") {
+          // 실력전: 실력 순으로 줄 세워서 4명씩 끊어요 (비슷한 수준끼리 한 코트)
+          const bySkill = [...picked].sort((x, y) => skillOf(y.id) - skillOf(x.id));
+          groups = courtsToFill.map((_, i) => bySkill.slice(i * 4, i * 4 + 4));
+        }
+        for (let t = 0; t < (matchMode === "skill" ? 0 : 300); t++) {
           const bySkill = [...picked].sort((x, y) => skillOf(y.id) - skillOf(x.id));
           const quarters = [0, 1, 2, 3].map((q) => shuffleArr(bySkill.slice(q * k, (q + 1) * k)));
           // 대부분은 "실력 4등분 → 코트마다 한 명씩" 배치, 일부(3번에 1번)는 완전 무작위 배치도 시도해서 같은 팀 반복을 피할 길을 넓혀요
