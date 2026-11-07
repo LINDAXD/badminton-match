@@ -139,7 +139,7 @@ function splitScore(four, ctx, excludeKey) {
     if (mode !== "social" && skillOf) {
       const WEAK = 0.35; // 대략 왕초보(820점)·승률이 많이 낮은 사람
       [a, b].forEach((team) => {
-        if (skillOf(team[0].id) < WEAK && skillOf(team[1].id) < WEAK) weakPairPenalty += 25;
+        if (skillOf(team[0].id) < WEAK && skillOf(team[1].id) < WEAK) weakPairPenalty += 4000; // 왕초보끼리 한 팀은 어쩔 수 없을 때만
       });
     }
 
@@ -2667,6 +2667,19 @@ function App() {
           // 실력전: 실력 순으로 줄 세워서 4명씩 끊어요 (비슷한 수준끼리 한 코트)
           const bySkill = [...picked].sort((x, y) => skillOf(y.id) - skillOf(x.id));
           groups = courtsToFill.map((_, i) => bySkill.slice(i * 4, i * 4 + 4));
+          // 실력 순서에 조금씩 흔들림을 줘서 여러 번 시도하고, "실력 차가 작고 + 왕초보끼리 한 팀이 안 되는" 배치를 골라요
+          const costOf = (fours) => fours.reduce((sum, four) => {
+            const sk = four.map((p) => skillOf(p.id));
+            return sum + splitScore(four, matchCtx).s + (Math.max(...sk) - Math.min(...sk)) * 800;
+          }, 0);
+          bestTotal = costOf(groups);
+          for (let t = 0; t < 400; t++) {
+            const noisy = [...picked].map((p) => ({ p, k: skillOf(p.id) + (Math.random() - 0.5) * 0.4 })).sort((x, y) => y.k - x.k).map((x) => x.p);
+            const sh = shuffleArr(picked);
+            const trial = t % 3 === 2 ? courtsToFill.map((_, i) => sh.slice(i * 4, i * 4 + 4)) : courtsToFill.map((_, i) => noisy.slice(i * 4, i * 4 + 4));
+            const total = costOf(trial);
+            if (total < bestTotal) { bestTotal = total; groups = trial; }
+          }
         }
         for (let t = 0; t < (matchMode === "skill" ? 0 : 300); t++) {
           const bySkill = [...picked].sort((x, y) => skillOf(y.id) - skillOf(x.id));
