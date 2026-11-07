@@ -100,7 +100,7 @@ window.GRADES = [
   { key: "신입회원", emoji: "🌱", color: "bg-stone-50 text-stone-400 border-stone-200" },
 ];
 
-window.LEVELS = ["왕초보", "초보", "D조", "C조", "B조"];
-window.LEVEL_SKILL = { "왕초보": 0.05, "초보": 0.25, "D조": 0.5, "C조": 0.75, "B조": 0.95 };
+window.LEVELS = ["왕초보", "초보", "D조", "C조", "B조", "A조"];
+window.LEVEL_SKILL = { "왕초보": 0.05, "초보": 0.25, "D조": 0.5, "C조": 0.7, "B조": 0.85, "A조": 1.0 };
 
 window.ADMIN_PIN = "004400";
