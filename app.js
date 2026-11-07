@@ -975,6 +975,7 @@ function logMatchResult(record) {
 // ---------- 하단 고정 내비게이션 ----------
 function BottomNav({ active }) {
   const items = [
+    { key: "attend", href: "./match.html?tab=attend", icon: "✅", label: "참석" },
     { key: "match", href: "./match.html?tab=match", icon: "🔀", label: "매칭" },
     { key: "results", href: "./match.html?tab=results", icon: "📝", label: "경기결과" },
     { key: "ranking", href: "./match.html?tab=ranking", icon: "🏆", label: "랭킹" },
@@ -997,7 +998,7 @@ function TopHeader({ title, subtitle }) {
   return (
     <header className="px-5 pt-6 pb-3 max-w-2xl mx-auto">
       <div className="min-w-0">
-        <a href="./match.html?tab=match" className="headfont text-xs tracking-wide" style={{ color: "var(--bc-blue)" }}>🏸 BIRDIE</a>
+        <a href="./match.html?tab=attend" className="headfont text-xs tracking-wide" style={{ color: "var(--bc-blue)" }}>🏸 BIRDIE</a>
         {title && <h1 className="headfont text-[26px] text-stone-900 mt-1.5 leading-tight">{title}</h1>}
         {subtitle && <p className="text-sm text-stone-400 mt-1">{subtitle}</p>}
       </div>
@@ -1140,7 +1141,7 @@ class ErrorBoundary extends React.Component {
           >
             🔄 새로고침
           </button>
-          <a href="./match.html?tab=match" className="text-xs text-stone-400 underline underline-offset-2 mt-4">매칭으로 가기</a>
+          <a href="./match.html?tab=attend" className="text-xs text-stone-400 underline underline-offset-2 mt-4">매칭으로 가기</a>
         </div>
       );
     }

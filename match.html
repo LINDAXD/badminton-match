@@ -538,9 +538,9 @@ function App() {
   const [tab, setTab] = useState(() => {
     try {
       const q = new URLSearchParams(window.location.search).get("tab");
-      if (["match", "record", "ranking", "players", "results"].includes(q)) return q;
+      if (["attend", "match", "record", "ranking", "players", "results"].includes(q)) return q;
     } catch (e) {}
-    return "match";
+    return "attend";
   });
   // "record" 탭을 다른 사람 기록 보기용으로도 쓸 수 있게 — URL에 ?id=회원ID가 있으면 그 사람 기록을 보여줘요.
   // 없으면 예전처럼 지금 로그인한 내 기록을 보여줘요.
@@ -3376,30 +3376,8 @@ function App() {
       )}
 
 
-      {tab === "match" && (
+      {tab === "attend" && (
         <section className="px-5 mt-5 space-y-4">
-          {/* 오늘 운영 현황 — 매칭 화면 켜자마자 1초 만에 상황 파악 */}
-          <div className="bc-card px-4 py-3">
-            <p className="text-sm font-semibold text-stone-700">
-              🏸 {activePlayers.length}명 참석 · <span style={{ color: "var(--bc-blue)" }}>{playingNowIds.size}명 경기 중</span> · {displayWaitingCount}명 대기
-            </p>
-            {waitingPlayers.length > 0 && (
-              <p className="text-xs text-stone-400 mt-1">
-                다음 코트 → {waitingPlayers.slice(0, 4).map((p) => p.name).join(" · ")}
-              </p>
-            )}
-            {adminOn && Object.values(courtMatches).filter((m) => m && !m.done && m.date === todayStr()).length >= 2 && (
-              <button
-                onClick={reshuffleAllCourts}
-                disabled={reshuffleAllBusy}
-                className="mt-2 w-full rounded-xl py-2 text-xs font-semibold border disabled:opacity-50"
-                style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}
-              >
-                {reshuffleAllBusy ? "섞는 중..." : "🔀 지금 뛰는 코트 전체 다시 섞기"}
-              </button>
-            )}
-          </div>
-
           {/* 참석 체크 — 이름만 눌러서 바로 참석/취소 (홈 탭 대신 여기서 해요) */}
           <div className="bc-card p-4">
             <div className="flex items-center justify-between">
@@ -3439,6 +3417,90 @@ function App() {
                 </div>
                 <p className="text-[11px] text-stone-400 mt-2">누르면 참석, 다시 누르면 취소예요. 🟢 대기 · 🔵 경기 중</p>
               </>
+            )}
+          </div>
+
+          <div className="bc-card p-4">
+            <p className="text-xs font-semibold text-stone-500 mb-1">다음 경기는 쉴래요</p>
+            <p className="text-xs text-stone-400 mb-2">본인 이름은 언제든 누를 수 있고, 관리자는 다른 사람 대신 눌러줄 수도 있어요. 누르면 다음 경기 시작할 때 대기 명단에서 빠져요. 아래 목록은 관리자를 포함해 모두에게 실시간으로 보여요.</p>
+            {Object.keys(restWish).length > 0 && (
+              <p className="text-xs font-semibold mb-2" style={{ color: "var(--bc-blue)" }}>
+                ✋ 쉬고 싶어하는 사람: {players.filter((p) => restWish[p.id]).map((p) => p.name).join(", ") || "-"}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {players.map((p) => {
+                const wantsRest = !!restWish[p.id];
+                const canToggle = true; // 공용 태블릿이라 "본인 확인"이 의미 없어서, 매칭에 들어가 있어도 누구나 눌러줄 수 있게 해요
+                return (
+                  <button
+                    key={p.id}
+                    disabled={!canToggle}
+                    onClick={() => toggleRestWish(p.id)}
+                    className={`px-3 py-1.5 rounded-full text-xs border transition ${
+                      wantsRest ? "" : "bg-stone-50 text-stone-500 border-stone-200"
+                    } ${!canToggle ? "opacity-40 cursor-not-allowed" : ""}`}
+                    style={wantsRest ? { backgroundColor: "#F1F5F9", color: "#7C8494", borderColor: "#F1F5F9" } : {}}
+                  >
+                    {wantsRest && "⚪ "}{p.name} {wantsRest ? "· 쉼" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bc-card p-4">
+            <p className="text-xs font-semibold text-stone-500 mb-1">🚪 오늘 먼저 갈게요</p>
+            <p className="text-xs text-stone-400 mb-2">체크하면 매칭 대상에서 빠지고, "먼저 감" 표시가 떠요. 본인은 언제든, 관리자는 대신 눌러줄 수 있어요.</p>
+            {Object.keys(leftEarly).length > 0 && (
+              <p className="text-xs font-semibold mb-2" style={{ color: "#DC2626" }}>
+                🚪 먼저 간 사람: {players.filter((p) => leftEarly[p.id]).map((p) => p.name).join(", ") || "-"}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {players.map((p) => {
+                const left = !!leftEarly[p.id];
+                const canToggle = true; // 공용 태블릿이라 "본인 확인"이 의미 없어서, 매칭에 들어가 있어도 누구나 눌러줄 수 있게 해요
+                return (
+                  <button
+                    key={p.id}
+                    disabled={!canToggle}
+                    onClick={() => toggleLeftEarly(p)}
+                    className={`px-3 py-1.5 rounded-full text-xs border transition ${
+                      left ? "" : "bg-stone-50 text-stone-500 border-stone-200"
+                    } ${!canToggle ? "opacity-40 cursor-not-allowed" : ""}`}
+                    style={left ? { backgroundColor: "#FEE2E2", color: "#DC2626", borderColor: "#FEE2E2" } : {}}
+                  >
+                    {left && "🚪 "}{p.name} {left ? "· 먼저 감" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {tab === "match" && (
+        <section className="px-5 mt-5 space-y-4">
+          {/* 오늘 운영 현황 — 매칭 화면 켜자마자 1초 만에 상황 파악 */}
+          <div className="bc-card px-4 py-3">
+            <p className="text-sm font-semibold text-stone-700">
+              🏸 {activePlayers.length}명 참석 · <span style={{ color: "var(--bc-blue)" }}>{playingNowIds.size}명 경기 중</span> · {displayWaitingCount}명 대기
+            </p>
+            {waitingPlayers.length > 0 && (
+              <p className="text-xs text-stone-400 mt-1">
+                다음 코트 → {waitingPlayers.slice(0, 4).map((p) => p.name).join(" · ")}
+              </p>
+            )}
+            {adminOn && Object.values(courtMatches).filter((m) => m && !m.done && m.date === todayStr()).length >= 2 && (
+              <button
+                onClick={reshuffleAllCourts}
+                disabled={reshuffleAllBusy}
+                className="mt-2 w-full rounded-xl py-2 text-xs font-semibold border disabled:opacity-50"
+                style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}
+              >
+                {reshuffleAllBusy ? "섞는 중..." : "🔀 지금 뛰는 코트 전체 다시 섞기"}
+              </button>
             )}
           </div>
 
@@ -4325,64 +4387,6 @@ function App() {
               </div>
             );
           })()}
-
-          <div className="bc-card p-4">
-            <p className="text-xs font-semibold text-stone-500 mb-1">다음 경기는 쉴래요</p>
-            <p className="text-xs text-stone-400 mb-2">본인 이름은 언제든 누를 수 있고, 관리자는 다른 사람 대신 눌러줄 수도 있어요. 누르면 다음 경기 시작할 때 대기 명단에서 빠져요. 아래 목록은 관리자를 포함해 모두에게 실시간으로 보여요.</p>
-            {Object.keys(restWish).length > 0 && (
-              <p className="text-xs font-semibold mb-2" style={{ color: "var(--bc-blue)" }}>
-                ✋ 쉬고 싶어하는 사람: {players.filter((p) => restWish[p.id]).map((p) => p.name).join(", ") || "-"}
-              </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              {players.map((p) => {
-                const wantsRest = !!restWish[p.id];
-                const canToggle = true; // 공용 태블릿이라 "본인 확인"이 의미 없어서, 매칭에 들어가 있어도 누구나 눌러줄 수 있게 해요
-                return (
-                  <button
-                    key={p.id}
-                    disabled={!canToggle}
-                    onClick={() => toggleRestWish(p.id)}
-                    className={`px-3 py-1.5 rounded-full text-xs border transition ${
-                      wantsRest ? "" : "bg-stone-50 text-stone-500 border-stone-200"
-                    } ${!canToggle ? "opacity-40 cursor-not-allowed" : ""}`}
-                    style={wantsRest ? { backgroundColor: "#F1F5F9", color: "#7C8494", borderColor: "#F1F5F9" } : {}}
-                  >
-                    {wantsRest && "⚪ "}{p.name} {wantsRest ? "· 쉼" : ""}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="bc-card p-4">
-            <p className="text-xs font-semibold text-stone-500 mb-1">🚪 오늘 먼저 갈게요</p>
-            <p className="text-xs text-stone-400 mb-2">체크하면 매칭 대상에서 빠지고, "먼저 감" 표시가 떠요. 본인은 언제든, 관리자는 대신 눌러줄 수 있어요.</p>
-            {Object.keys(leftEarly).length > 0 && (
-              <p className="text-xs font-semibold mb-2" style={{ color: "#DC2626" }}>
-                🚪 먼저 간 사람: {players.filter((p) => leftEarly[p.id]).map((p) => p.name).join(", ") || "-"}
-              </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              {players.map((p) => {
-                const left = !!leftEarly[p.id];
-                const canToggle = true; // 공용 태블릿이라 "본인 확인"이 의미 없어서, 매칭에 들어가 있어도 누구나 눌러줄 수 있게 해요
-                return (
-                  <button
-                    key={p.id}
-                    disabled={!canToggle}
-                    onClick={() => toggleLeftEarly(p)}
-                    className={`px-3 py-1.5 rounded-full text-xs border transition ${
-                      left ? "" : "bg-stone-50 text-stone-500 border-stone-200"
-                    } ${!canToggle ? "opacity-40 cursor-not-allowed" : ""}`}
-                    style={left ? { backgroundColor: "#FEE2E2", color: "#DC2626", borderColor: "#FEE2E2" } : {}}
-                  >
-                    {left && "🚪 "}{p.name} {left ? "· 먼저 감" : ""}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </section>
       )}
 
