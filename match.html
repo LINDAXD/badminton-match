@@ -557,6 +557,7 @@ function App() {
   const [attendQ, setAttendQ] = useState("");
   const [nextEdit, setNextEdit] = useState(null); // { court, side: "A"|"B", idx }
   const [nextBusy, setNextBusy] = useState(false);
+  const [shuffleNonce, setShuffleNonce] = useState(0);
   const [roster, setRoster] = useState([]);
   const [rosterReady, setRosterReady] = useState(false);
   const [manageMode, setManageMode] = useState(false);
@@ -1899,7 +1900,7 @@ function App() {
   // 🔮 다음 경기 예상 — 아직 "다음 경기 예약"이 없는 코트도, 지금 경기가 끝난다고 치고 미리 보여줘요 (예상이라 바뀔 수 있어요)
   const predictSig = JSON.stringify([
     Object.entries(courtMatches).filter(([, c]) => c && !c.done && c.date === todayStr() && !c.friendly).map(([cn, c]) => [cn, c.teamA.map((p) => p.id), c.teamB.map((p) => p.id), c.next ? [c.next.teamA.map((p) => p.id), c.next.teamB.map((p) => p.id)] : 0]),
-    players.map((p) => p.id), Object.keys(restWish), Object.keys(leftEarly), excluded, numCourts, history.length,
+    players.map((p) => p.id), Object.keys(restWish), Object.keys(leftEarly), excluded, numCourts, history.length, shuffleNonce,
   ]);
   const predictedNext = React.useMemo(() => {
     try {
@@ -2376,6 +2377,32 @@ function App() {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
+  // 다음 게임 다시 섞기: 예약된 다음 경기를 풀고(대기자 1순위 규칙은 그대로) 새 조합으로 다시 짜요
+  async function reshuffleNextGames() {
+    if (!adminOn) { tryAdminUnlock(); return; }
+    if (nextBusy) return;
+    setNextBusy(true);
+    try {
+      const hasReserved = Object.values(courtMatches).some((c) => c && !c.done && c.date === todayStr() && !c.friendly && c.next);
+      if (hasReserved) {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(REFS.courtmatches);
+          const cur = (snap.data() || {}).data || {};
+          const out = {};
+          Object.entries(cur).forEach(([cn, c]) => {
+            if (c && !c.done && c.date === todayStr() && !c.friendly && c.next) { const { next: _n, ...rest } = c; out[cn] = rest; } else out[cn] = c;
+          });
+          tx.set(REFS.courtmatches, { data: out });
+        });
+      }
+      setNextEdit(null);
+      setShuffleNonce((n) => n + 1);
+    } catch (e) {
+      appAlert("⚠️ 다시 섞기 중 오류: " + (e && e.message ? e.message : String(e)));
+    }
+    setNextBusy(false);
+  }
+
   // 다음 게임: 예약이 없는 코트는 "예상"을 먼저 진짜 예약으로 확정한 뒤, 사람을 바꿔요
   async function editNextGame(edit, candId) {
     if (!adminOn) { tryAdminUnlock(); return; }
@@ -4525,6 +4552,9 @@ function App() {
                 <div className="bc-card p-4">
                   <p className="text-sm font-bold text-stone-800">⏭️ 다음 게임</p>
                   <p className="text-[11px] text-stone-400 mt-0.5">지금 게임이 끝나면 누가 들어가는지 미리 보고 준비해요. 대기자가 1순위고, 코트 수만큼 대기자가 없으면 지금 뛰는 사람이 섞여요.{adminOn ? " 이름(✎)을 누르면 사람을 바꿀 수 있어요." : ""}</p>
+                  {adminOn && nums.length > 0 && (
+                    <button onClick={reshuffleNextGames} disabled={nextBusy} className="mt-2 w-full rounded-xl py-2 text-xs font-semibold border disabled:opacity-50" style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}>🔀 다음 게임 다시 섞기 (대기자 1순위)</button>
+                  )}
                   {adminOn && anyPred && (
                     <button onClick={() => editNextGame(null)} disabled={nextBusy} className="mt-2 w-full rounded-xl py-2 text-xs font-semibold border disabled:opacity-50" style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}>📌 예상을 이대로 확정하기</button>
                   )}
