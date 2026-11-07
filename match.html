@@ -1843,6 +1843,35 @@ function App() {
     .sort((a, b) => a.name.localeCompare(b.name, "ko"));
 
   const _partnerMap = todayPartnerMap();
+  // 🔮 다음 경기 예상 — 아직 "다음 경기 예약"이 없는 코트도, 지금 경기가 끝난다고 치고 미리 보여줘요 (예상이라 바뀔 수 있어요)
+  const predictSig = JSON.stringify([
+    Object.entries(courtMatches).filter(([, c]) => c && !c.done && c.date === todayStr() && !c.friendly).map(([cn, c]) => [cn, c.teamA.map((p) => p.id), c.teamB.map((p) => p.id), c.next ? [c.next.teamA.map((p) => p.id), c.next.teamB.map((p) => p.id)] : 0]),
+    players.map((p) => p.id), Object.keys(restWish), Object.keys(leftEarly), excluded, numCourts, history.length,
+  ]);
+  const predictedNext = React.useMemo(() => {
+    try {
+      const live = Object.entries(courtMatches).filter(([cn, c]) => c && !c.done && c.date === todayStr() && !c.friendly && !isNaN(Number(cn)));
+      const reserved = new Set();
+      const nowIds = new Set();
+      live.forEach(([, c]) => {
+        [...c.teamA, ...c.teamB].forEach((p) => nowIds.add(p.id));
+        if (c.next) [...c.next.teamA, ...c.next.teamB].forEach((p) => reserved.add(p.id));
+      });
+      const need = live.filter(([, c]) => !c.next).map(([cn]) => cn).sort((a, b) => Number(a) - Number(b));
+      if (!need.length) return {};
+      const ri0 = roundInfo();
+      const sim = players
+        .filter((p) => !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id) && !reserved.has(p.id))
+        .map((p) => ({ ...p, gamesPlayed: (p.gamesPlayed || 0) + (nowIds.has(p.id) ? 1 : 0), streak: nowIds.has(p.id) ? streakCls(ri0, p.id) + 1 : streakCls(ri0, p.id) }));
+      const courts = Math.min(need.length, Math.floor(sim.length / 4));
+      if (courts < 1) return {};
+      const { matches } = generateRound(sim, courts, hist, new Set(), skillOf, todayPartnerMap());
+      const out = {};
+      matches.forEach((mm, idx) => { out[need[idx]] = mm; });
+      return out;
+    } catch (e) { return {}; }
+  }, [predictSig]);
+
   const matchCtx = { hist, skillOf, mode: matchMode, todayPairCount, partnerToday: (x, y) => _partnerMap[pKey(x, y)] || 0, isFirstTimer, isKindOrStrong };
 
   // 대기 시간 대신: "방금 게임에 못 들어간 사람"을 다음 매칭에서 반드시 우선 배정하고, 나머지는 랜덤으로 뽑아요.
@@ -3402,8 +3431,10 @@ function App() {
                         )}
                         {live && live.next ? (
                           <p className="text-xs mt-1.5 rounded-lg px-2 py-1.5" style={{ backgroundColor: "#FEF9C3", color: "#854D0E" }}>⏭️ 다음 준비! {names(live.next.teamA)} vs {names(live.next.teamB)}</p>
+                        ) : live && predictedNext[cn] ? (
+                          <p className="text-xs mt-1.5 rounded-lg px-2 py-1.5" style={{ backgroundColor: "#F1F5F9", color: "#475569" }}>🔮 다음 예상 (바뀔 수 있어요) {names(predictedNext[cn].teamA)} vs {names(predictedNext[cn].teamB)}</p>
                         ) : (
-                          <p className="text-[11px] mt-1.5 text-stone-400">⏭️ 다음: 아직 안 정해졌어요</p>
+                          <p className="text-[11px] mt-1.5 text-stone-400">⏭️ 다음: 인원이 모자라서 아직 못 정해요</p>
                         )}
                       </div>
                     );
