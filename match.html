@@ -555,6 +555,8 @@ function App() {
   const [matchView, setMatchView] = useState("auto"); // auto | friendly
   const [attendOpen, setAttendOpen] = useState(true);
   const [attendQ, setAttendQ] = useState("");
+  const [nextEdit, setNextEdit] = useState(null); // { court, side: "A"|"B", idx }
+  const [nextBusy, setNextBusy] = useState(false);
   const [roster, setRoster] = useState([]);
   const [rosterReady, setRosterReady] = useState(false);
   const [manageMode, setManageMode] = useState(false);
@@ -1863,11 +1865,19 @@ function App() {
       const sim = players
         .filter((p) => !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id) && !reserved.has(p.id))
         .map((p) => ({ ...p, gamesPlayed: (p.gamesPlayed || 0) + (nowIds.has(p.id) ? 1 : 0), streak: nowIds.has(p.id) ? streakCls(ri0, p.id) + 1 : streakCls(ri0, p.id) }));
-      const courts = Math.min(need.length, Math.floor(sim.length / 4));
-      if (courts < 1) return {};
-      const { matches } = generateRound(sim, courts, hist, new Set(), skillOf, todayPartnerMap());
+      const nowCourt = {};
+      live.forEach(([cn, c]) => { [...c.teamA, ...c.teamB].forEach((p) => { nowCourt[p.id] = String(cn); }); });
+      const used = new Set();
       const out = {};
-      matches.forEach((mm, idx) => { out[need[idx]] = mm; });
+      // 코트마다: 대기자가 1순위, 모자라면 "그 코트에서 지금 뛰는 사람"으로 채워요 (다른 코트에서 아직 뛰는 사람은 안 넣어요 — 동시에 두 곳에 설 수 없으니까)
+      need.forEach((cn) => {
+        const pool = sim.filter((p) => !used.has(p.id) && (!nowCourt[p.id] || nowCourt[p.id] === String(cn)));
+        if (pool.length < 4) return;
+        const { matches } = generateRound(pool, 1, hist, new Set(), skillOf, todayPartnerMap());
+        if (!matches.length) return;
+        out[cn] = matches[0];
+        [...matches[0].teamA, ...matches[0].teamB].forEach((p) => used.add(p.id));
+      });
       return out;
     } catch (e) { return {}; }
   }, [predictSig]);
@@ -2315,6 +2325,58 @@ function App() {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
+  // 다음 게임: 예약이 없는 코트는 "예상"을 먼저 진짜 예약으로 확정한 뒤, 사람을 바꿔요
+  async function editNextGame(edit, candId) {
+    if (!adminOn) { tryAdminUnlock(); return; }
+    if (nextBusy) return;
+    setNextBusy(true);
+    try {
+      const slim = (p) => ({ id: p.id, name: p.name });
+      const predicted = predictedNext;
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const cur = (snap.data() || {}).data || {};
+        const out = { ...cur };
+        Object.entries(cur).forEach(([cn, c]) => {
+          if (!c || c.done || c.date !== todayStr() || c.friendly || c.next) return;
+          const pr = predicted[cn];
+          if (!pr) return;
+          const a = pr.teamA.map(slim), b = pr.teamB.map(slim);
+          out[cn] = { ...c, next: { teamA: a, teamB: b, captainId: (a[0] || {}).id || null } };
+        });
+        if (!edit) { tx.set(REFS.courtmatches, { data: out }); return; }
+        const cand = players.find((p) => p.id === candId);
+        const tgt = out[edit.court];
+        if (!cand || !tgt || !tgt.next) return;
+        const key = edit.side === "A" ? "teamA" : "teamB";
+        const old = tgt.next[key][edit.idx];
+        if (!old || old.id === cand.id) return;
+        // 후보가 다른 "다음 경기" 칸에 이미 있으면 서로 자리를 바꿔요
+        let where = null;
+        Object.entries(out).forEach(([cn, c]) => {
+          if (!c || c.done || c.date !== todayStr() || !c.next) return;
+          ["teamA", "teamB"].forEach((k) => c.next[k].forEach((p, i) => { if (p.id === cand.id) where = { cn, k, i }; }));
+        });
+        const nowAt = {};
+        Object.entries(out).forEach(([cn, c]) => { if (c && !c.done && c.date === todayStr() && !c.friendly) [...c.teamA, ...c.teamB].forEach((p) => { nowAt[p.id] = String(cn); }); });
+        const okAt = (id, cn) => !nowAt[id] || nowAt[id] === String(cn);
+        if (!okAt(cand.id, edit.court) || (where && !okAt(old.id, where.cn))) { throw new Error("그 사람은 지금 다른 코트에서 뛰고 있어서 이 코트 다음 경기에 못 넣어요."); }
+        const put = (cn, k, i, person) => {
+          const c = out[cn];
+          const arr = c.next[k].map((p, j) => (j === i ? slim(person) : p));
+          out[cn] = { ...c, next: { ...c.next, [k]: arr } };
+        };
+        put(edit.court, key, edit.idx, cand);
+        if (where) put(where.cn, where.k, where.i, old);
+        tx.set(REFS.courtmatches, { data: out });
+      });
+      setNextEdit(null);
+    } catch (e) {
+      appAlert("⚠️ 다음 게임 수정 중 오류: " + (e && e.message ? e.message : String(e)));
+    }
+    setNextBusy(false);
+  }
+
   function buildMemberPayload() {
     const clean = (v) => (v === "" || v == null ? "" : String(v));
     const courts = Object.entries(courtMatches)
@@ -2326,6 +2388,7 @@ function App() {
         scoreA: clean(m.scoreA),
         scoreB: clean(m.scoreB),
         next: m.next ? { teamA: m.next.teamA.map((p) => p.name), teamB: m.next.teamB.map((p) => p.name) } : null,
+        nextPred: !m.next && !m.friendly && predictedNext[cn] ? { teamA: predictedNext[cn].teamA.map((p) => p.name), teamB: predictedNext[cn].teamB.map((p) => p.name) } : null,
       }))
       .sort((a, b) => String(a.court).localeCompare(String(b.court), "ko", { numeric: true }));
     const members = roster.map((r) => {
@@ -2358,7 +2421,7 @@ function App() {
       } catch (e) {}
     }, 800);
     return () => clearTimeout(t);
-  }, [adminOn, memberPw, courtMatches, matchhistory, roster, players, restWish, leftEarly, excluded, plan, numCourts]);
+  }, [adminOn, memberPw, courtMatches, matchhistory, roster, players, restWish, leftEarly, excluded, plan, numCourts, predictedNext]);
   function randomMemberPw() {
     const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // 헷갈리는 글자(0/O, 1/I/L) 뺐어요
     const arr = new Uint32Array(8);
@@ -3572,7 +3635,7 @@ function App() {
           </div>
 
           <div className="flex rounded-xl border p-1 gap-1" style={{ borderColor: "var(--bc-line)", backgroundColor: "#F8FAFC" }}>
-            {[["auto", "🎲 자동매칭"], ["friendly", "🎈 친선"]].map(([k, label]) => (
+            {[["auto", "🎲 자동매칭"], ["friendly", "🎈 친선"], ["next", "⏭️ 다음게임"]].map(([k, label]) => (
               <button
                 key={k}
                 onClick={() => setMatchView(k)}
@@ -4326,6 +4389,110 @@ function App() {
           })()}
 
           </>)}
+
+          {matchView === "next" && (() => {
+            const nums = Object.entries(courtMatches).filter(([cn, c]) => c && !c.done && c.date === todayStr() && !c.friendly && !isNaN(Number(cn))).map(([cn]) => cn).sort((a, b) => Number(a) - Number(b));
+            const nm = (p) => p.name;
+            const where = {};
+            nums.forEach((cn) => {
+              const c = courtMatches[cn];
+              [...c.teamA, ...c.teamB].forEach((p) => { where[p.id] = `${cn}코트 경기중`; });
+            });
+            nums.forEach((cn) => {
+              const c = courtMatches[cn];
+              const nx = c.next || predictedNext[cn];
+              if (nx) [...nx.teamA, ...nx.teamB].forEach((p) => { where[p.id] = (where[p.id] ? where[p.id] + " → " : "") + `${cn}코트 다음`; });
+            });
+            const nowCourtOf = {};
+            nums.forEach((cn) => { [...courtMatches[cn].teamA, ...courtMatches[cn].teamB].forEach((p) => { nowCourtOf[p.id] = cn; }); });
+            const nextCourtOf = {};
+            nums.forEach((cn) => { const nx0 = courtMatches[cn].next || predictedNext[cn]; if (nx0) [...nx0.teamA, ...nx0.teamB].forEach((p) => { nextCourtOf[p.id] = cn; }); });
+            const candidatesFor = (edit) => {
+              const nx0 = courtMatches[edit.court].next || predictedNext[edit.court];
+              const old = nx0 ? (edit.side === "A" ? nx0.teamA : nx0.teamB)[edit.idx] : null;
+              return players.filter((p) => {
+                if (leftEarly[p.id] || excluded.includes(p.id) || restWish[p.id]) return false;
+                if (old && p.id === old.id) return false;
+                if (nowCourtOf[p.id] && nowCourtOf[p.id] !== edit.court) return false;
+                const nc = nextCourtOf[p.id];
+                if (nc && old && nowCourtOf[old.id] && nowCourtOf[old.id] !== nc) return false;
+                return true;
+              });
+            };
+            const anyPred = nums.some((cn) => !courtMatches[cn].next && predictedNext[cn]);
+            const NameBtn = ({ cn, side, idx, p }) => {
+              const sel = nextEdit && nextEdit.court === cn && nextEdit.side === side && nextEdit.idx === idx;
+              return (
+                <button
+                  onClick={() => adminOn ? setNextEdit(sel ? null : { court: cn, side, idx }) : null}
+                  className="px-2.5 py-1 rounded-full text-sm border"
+                  style={sel ? { backgroundColor: "var(--bc-navy)", color: "#fff", borderColor: "var(--bc-navy)" } : { borderColor: "var(--bc-line)", color: "#334155", backgroundColor: "#fff" }}
+                >{p.name}{adminOn && !sel ? " ✎" : ""}</button>
+              );
+            };
+            return (
+              <div className="space-y-3">
+                <div className="bc-card p-4">
+                  <p className="text-sm font-bold text-stone-800">⏭️ 다음 게임</p>
+                  <p className="text-[11px] text-stone-400 mt-0.5">지금 게임이 끝나면 누가 들어가는지 미리 보고 준비해요. 대기자가 1순위고, 코트 수만큼 대기자가 없으면 지금 뛰는 사람이 섞여요.{adminOn ? " 이름(✎)을 누르면 사람을 바꿀 수 있어요." : ""}</p>
+                  {adminOn && anyPred && (
+                    <button onClick={() => editNextGame(null)} disabled={nextBusy} className="mt-2 w-full rounded-xl py-2 text-xs font-semibold border disabled:opacity-50" style={{ borderColor: "var(--bc-line)", color: "var(--bc-navy)" }}>📌 예상을 이대로 확정하기</button>
+                  )}
+                </div>
+                {nums.length === 0 && <div className="bc-card p-4 text-sm text-stone-400">지금 진행 중인 경기가 없어요. 경기를 시작하면 다음 게임이 여기 떠요.</div>}
+                {nums.map((cn) => {
+                  const c = courtMatches[cn];
+                  const reserved = !!c.next;
+                  const nx = c.next || predictedNext[cn];
+                  return (
+                    <div key={cn} className="bc-card overflow-hidden">
+                      <div className="px-4 py-2 flex items-center justify-between" style={{ backgroundColor: "var(--bc-navy)" }}>
+                        <p className="text-white text-sm font-bold">{cn}코트</p>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: "#DCFCE7", color: "#15803D" }}>🟢 지금 경기중</span>
+                      </div>
+                      <div className="p-3 space-y-2">
+                        <p className="text-sm text-stone-700">{c.teamA.map(nm).join(" · ")} <span className="text-stone-400">vs</span> {c.teamB.map(nm).join(" · ")}</p>
+                        {nx ? (
+                          <div className="rounded-xl p-3" style={{ backgroundColor: reserved ? "#FEF9C3" : "#F1F5F9" }}>
+                            <p className="text-[11px] font-bold mb-1.5" style={{ color: reserved ? "#854D0E" : "#475569" }}>{reserved ? "⏭️ 다음 경기 (확정)" : "🔮 다음 경기 (예상 · 바뀔 수 있어요)"}</p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {nx.teamA.map((p, i) => <NameBtn key={p.id} cn={cn} side="A" idx={i} p={p} />)}
+                              <span className="text-xs text-stone-400">vs</span>
+                              {nx.teamB.map((p, i) => <NameBtn key={p.id} cn={cn} side="B" idx={i} p={p} />)}
+                            </div>
+                            {nextEdit && nextEdit.court === cn && (
+                              <div className="mt-3 pt-3 border-t" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
+                                <p className="text-[11px] text-stone-500 mb-1.5">누구로 바꿀까요? (이미 다른 다음 경기에 있으면 서로 자리가 바뀌어요)</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {candidatesFor(nextEdit).map((p) => (
+                                    <button key={p.id} disabled={nextBusy} onClick={() => editNextGame(nextEdit, p.id)} className="px-2.5 py-1 rounded-full text-xs border bg-white disabled:opacity-50" style={{ borderColor: "var(--bc-line)", color: "#475569" }}>
+                                      {p.name}<span className="text-stone-400"> · {where[p.id] || "대기"}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                                <button onClick={() => setNextEdit(null)} className="mt-2 text-xs text-stone-400 underline">취소</button>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-stone-400">⏭️ 다음 게임을 짤 인원이 아직 모자라요.</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="bc-card p-4">
+                  <p className="text-xs font-bold text-stone-500 mb-2">⏳ 대기자 ({waitingPlayers.length}명) · 다음 게임 1순위</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {waitingPlayers.length === 0 && <span className="text-xs text-stone-400">대기 중인 사람이 없어요</span>}
+                    {waitingPlayers.map((p) => (
+                      <span key={p.id} className="text-xs px-2.5 py-1 rounded-full border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>{p.name}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {matchView === "friendly" && (() => {
             const slotKeys = Array.from({ length: friendlyCourts }, (_, i) => `friendly${i + 1}`);

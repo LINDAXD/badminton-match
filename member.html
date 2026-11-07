@@ -58,7 +58,8 @@ function MatchTab({ data, q }) {
   const courts = data.courts || [];
   const hasQ = !!q;
   const inTeams = (c) => [...c.teamA, ...c.teamB].some((n) => n.includes(q));
-  const inNext = (c) => c.next && [...c.next.teamA, ...c.next.teamB].some((n) => n.includes(q));
+  const nx = (c) => c.next || c.nextPred;
+  const inNext = (c) => nx(c) && [...nx(c).teamA, ...nx(c).teamB].some((n) => n.includes(q));
   const mine = hasQ ? courts.filter((c) => inTeams(c) || inNext(c)) : [];
   return (
     <div className="space-y-3">
@@ -74,7 +75,7 @@ function MatchTab({ data, q }) {
               return (
                 <div key={c.court} className="text-sm text-stone-700 mb-1">
                   {now && <p>🟢 <b>{c.court}코트</b>에서 경기 중: {c.teamA.join(" + ")} <span className="text-stone-400">vs</span> {c.teamB.join(" + ")}</p>}
-                  {nxt && <p>⏭️ <b>{c.court}코트</b> 다음 경기: {c.next.teamA.join(" + ")} <span className="text-stone-400">vs</span> {c.next.teamB.join(" + ")}</p>}
+                  {nxt && <p>{c.next ? "⏭️" : "🔮"} <b>{c.court}코트</b> 다음 경기{c.next ? "" : "(예상)"}: {nx(c).teamA.join(" + ")} <span className="text-stone-400">vs</span> {nx(c).teamB.join(" + ")}</p>}
                 </div>
               );
             })
@@ -103,10 +104,10 @@ function MatchTab({ data, q }) {
             {c.scoreA !== "" && c.scoreB !== "" && c.scoreA != null && c.scoreB != null && (
               <p className="text-center text-lg font-bold mt-2 scorefont">{c.scoreA} : {c.scoreB}</p>
             )}
-            {c.next && (
-              <div className="mt-3 rounded-xl px-3 py-2 border text-xs text-stone-700" style={{ borderColor: "var(--bc-line)", backgroundColor: "#F7FAFF" }}>
-                <span className="font-bold" style={{ color: "var(--bc-navy)" }}>⏭️ 다음 경기 </span>
-                {c.next.teamA.join(" + ")} <span className="text-stone-400">vs</span> {c.next.teamB.join(" + ")}
+            {nx(c) && (
+              <div className="mt-3 rounded-xl px-3 py-2 border text-xs text-stone-700" style={{ borderColor: "var(--bc-line)", backgroundColor: c.next ? "#FEF9C3" : "#F1F5F9" }}>
+                <span className="font-bold" style={{ color: "var(--bc-navy)" }}>{c.next ? "⏭️ 다음 경기 " : "🔮 다음 경기(예상) "}</span>
+                {nx(c).teamA.join(" + ")} <span className="text-stone-400">vs</span> {nx(c).teamB.join(" + ")}
               </div>
             )}
           </div>
