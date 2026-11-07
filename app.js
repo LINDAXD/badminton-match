@@ -92,7 +92,7 @@ function fmtBirthday(b) {
 window.DEFAULT_SKILL_SCORE = 1000;
 
 // 처음 등록할 때 고른 실력(레벨)에 따른 시작 점수 — 경기를 치르면서 점수가 자동으로 조정돼요.
-window.LEVEL_START_SCORE = { "왕초보": 820, "초보": 920, "D조": 1000, "C조": 1100, "B조": 1200 };
+window.LEVEL_START_SCORE = { "왕초보": 820, "초보": 920, "D조": 1000, "C조": 1100, "B조": 1200, "A조": 1300 };
 function getSkillScore(member) {
   if (member && typeof member.skillScore === "number") return member.skillScore;
   if (member && member.level && window.LEVEL_START_SCORE[member.level]) return window.LEVEL_START_SCORE[member.level];

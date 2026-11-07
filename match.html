@@ -834,6 +834,39 @@ function App() {
     if (keptMsg) appAlert(keptMsg);
   }
 
+  // 전체 새로 매칭: 점수 입력 전인 지금 경기와 다음 경기 예약을 모두 지우고, 모든 코트를 처음부터 다시 짜요
+  async function rematchAll() {
+    if (!adminOn) { tryAdminUnlock(); return; }
+    const active = Object.entries(courtMatches).filter(([cn, m]) => m && !m.done && m.date === todayStr() && !m.friendly && !isNaN(Number(cn)));
+    const unscored = active.filter(([, m]) => isUnscoredMatch(m));
+    const scored = active.length - unscored.length;
+    if (!(await appConfirm(`지금 점수 입력 전인 경기 ${unscored.length}개와 다음 경기 예약을 모두 지우고, 참석자 전체로 새로 매칭할까요?${scored > 0 ? `\n(점수가 이미 들어간 ${scored}경기는 그대로 둬요)` : ""}`))) return;
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const current = (snap.data() || {}).data || {};
+        const cleaned = {};
+        Object.entries(current).forEach(([cn, c]) => {
+          if (c && !c.done && c.date === todayStr() && !c.friendly && !isNaN(Number(cn))) {
+            if (isUnscoredMatch(c)) return;
+            if (c.next) { const { next: _n, ...rest } = c; cleaned[cn] = rest; return; }
+          }
+          cleaned[cn] = c;
+        });
+        tx.set(REFS.courtmatches, { data: cleaned });
+      });
+    } catch (e) {
+      appAlert("초기화에 실패했어요. 다시 시도해주세요.");
+      return;
+    }
+    const targets = Array.from({ length: numCourts }, (_, i) => i + 1).filter((cn) => {
+      if (lockedCourts.includes(cn)) return false;
+      const cm = courtMatches[cn];
+      return !cm || cm.done || cm.date !== todayStr() || isUnscoredMatch(cm);
+    });
+    if (targets.length > 0) await startAllEmptyCourts(targets);
+  }
+
   // 이미 코트 수를 줄여놨는데 없어진 코트에 경기가 남아있는 경우 — 점수 입력 전 경기만 한 번에 정리해요
   async function closeExtraCourts() {
     const extra = Object.entries(courtMatches).filter(([cn, m]) => Number(cn) > numCourts && m && !m.done && m.date === todayStr() && !m.friendly);
@@ -1054,7 +1087,8 @@ function App() {
   }
 
   function skillOf(id) {
-    const m = roster.find((r) => r.id === id);
+    let m = roster.find((r) => r.id === id);
+    if (!m && String(id).startsWith("guest_")) { const g = guestlist.find((x) => x.id === id); if (g) m = { id, level: g.level || "D조" }; } // 게스트는 등록한 실력(레벨)으로 계산해요
     const raw = seedScore(m);
     return Math.max(0, Math.min(1, (raw - 700) / 600));
   }
@@ -1700,6 +1734,7 @@ function App() {
   }
 
   const [guestName, setGuestName] = useState("");
+  const [guestLevel, setGuestLevel] = useState("D조");
   const [guestlist, setGuestlist] = useState([]);
 
   useEffect(() => {
@@ -1733,7 +1768,7 @@ function App() {
       return;
     }
     const guestId = "guest_" + uid();
-    const entry = { id: guestId, name: trimmed, date: todayStr() };
+    const entry = { id: guestId, name: trimmed, date: todayStr(), level: guestLevel };
     setPlayers((p) => [...p, { id: guestId, name: `${trimmed} (게스트)`, gamesPlayed: 0, wins: 0, losses: 0 }]);
     db.runTransaction(async (tx) => {
       const snap = await tx.get(REFS.guestlist);
@@ -1742,6 +1777,16 @@ function App() {
       tx.set(REFS.guestlist, { items });
     }).catch(() => {});
     setGuestName("");
+  }
+
+  function setGuestLevelFor(id, level) {
+    if (!adminOn) { tryAdminUnlock(); return; }
+    setGuestlist((prev) => prev.map((g) => (g.id === id ? { ...g, level } : g)));
+    db.runTransaction(async (tx) => {
+      const snap = await tx.get(REFS.guestlist);
+      const items = ((snap.data() || {}).items || []).map((g) => (g.id === id ? { ...g, level } : g));
+      tx.set(REFS.guestlist, { items });
+    }).catch(() => {});
   }
 
   const [justShuffled, setJustShuffled] = useState(false);
@@ -1882,7 +1927,8 @@ function App() {
     } catch (e) { return {}; }
   }, [predictSig]);
 
-  const matchCtx = { hist, skillOf, mode: matchMode, todayPairCount, partnerToday: (x, y) => _partnerMap[pKey(x, y)] || 0, isFirstTimer, isKindOrStrong };
+  const matchCtx = { hist, skillOf, mode: matchMode, todayPairCount, partnerToday: (x, y) => _partnerMap[pKey(x, y)] || 0, isFirstTimer: (id) => isFirstTimer(id) && skillOf(id) < 0.45, isKindOrStrong };
+  // 첫 참석 보너스(고수와 한 팀)는 왕초보·초보처럼 실력이 낮은 첫 참석자에게만 줘요. D조 이상으로 등록한 사람은 등록한 실력 그대로 균형 맞춰요.
 
   // 대기 시간 대신: "방금 게임에 못 들어간 사람"을 다음 매칭에서 반드시 우선 배정하고, 나머지는 랜덤으로 뽑아요.
   function shuffleArr(arr) {
@@ -2060,13 +2106,21 @@ function App() {
   //  그때도 팀은 실력 차가 가장 적은 조합으로 갈라서 항상 공평하게 만들어요.)
   function pickFourForCourt() {
     if (matchMode !== "skill") return pickBalancedFour(waitingPlayers);
-    const byRank = [...waitingPlayers].sort((a, b) => skillOf(b.id) - skillOf(a.id));
-    const n = byRank.length;
-    if (n < 4) return byRank;
-    const start = skillRankOffset % n;
-    // start 위치부터 4명(부족하면 앞에서부터 이어서) 뽑아요
-    const four = [];
-    for (let i = 0; i < 4; i++) four.push(byRank[(start + i) % n]);
+    // 실력전도 "대기자 1순위"는 그대로 지켜요: 오래 기다린 순서(연속으로 뛴 사람은 뒤로) 앞쪽 8명 안에서,
+    // 가장 오래 기다린 사람이 꼭 들어가는 "실력이 비슷한 4명"을 골라요.
+    const n = waitingPlayers.length;
+    if (n < 4) return [...waitingPlayers];
+    const win = waitingPlayers.slice(0, Math.min(n, 8));
+    const byRank = [...win].sort((x, y) => skillOf(y.id) - skillOf(x.id));
+    const first = waitingPlayers[0];
+    const fi = byRank.findIndex((p) => p.id === first.id);
+    let best = null;
+    for (let s = Math.max(0, fi - 3); s <= Math.min(fi, byRank.length - 4); s++) {
+      const blk = byRank.slice(s, s + 4);
+      const spread = skillOf(blk[0].id) - skillOf(blk[3].id);
+      if (!best || spread < best.spread) best = { blk, spread };
+    }
+    const four = best ? best.blk : byRank.slice(0, 4);
     return four;
   }
 
@@ -3401,6 +3455,9 @@ function App() {
                   placeholder="가끔 오는 게스트 이름"
                   className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm"
                 />
+                <select value={guestLevel} onChange={(e) => setGuestLevel(e.target.value)} className="rounded-lg border border-stone-300 px-2 text-sm bg-white">
+                  {window.LEVELS.map((lv) => (<option key={lv} value={lv}>{lv}</option>))}
+                </select>
                 <button onClick={addGuest} className="rounded-lg px-4 text-sm font-semibold" style={{ backgroundColor: "var(--bc-blue)", color: "#fff" }}>
                   게스트 추가
                 </button>
@@ -3430,6 +3487,14 @@ function App() {
                         {isFirstTimer(p.id) && <MiniTag>🌱 첫참석</MiniTag>}
                         {badge && <span className={`text-[10px] font-medium ${badge.color}`}>{badge.emoji} {tier}</span>}
                         {showLevel && <MiniTag>{rosterMember.level}</MiniTag>}
+                        {String(p.id).startsWith("guest_") && (() => {
+                          const g = guestlist.find((x) => x.id === p.id);
+                          return adminOn ? (
+                            <select value={(g && g.level) || "D조"} onChange={(e) => setGuestLevelFor(p.id, e.target.value)} className="text-[11px] border border-stone-300 rounded px-1 py-0.5 bg-white">
+                              {window.LEVELS.map((lv) => (<option key={lv} value={lv}>{lv}</option>))}
+                            </select>
+                          ) : <MiniTag>{(g && g.level) || "D조"}</MiniTag>;
+                        })()}
                         {isExcluded && <span className="text-[10px] text-red-400">매칭 제외됨</span>}
                       </div>
                       <p className="text-xs text-stone-400 scorefont mt-1">
@@ -3875,6 +3940,15 @@ function App() {
                 className="bc-btn-lg bc-btn-cta w-full mt-3 text-sm disabled:opacity-60"
               >
                 {batchStarting ? "매칭 만드는 중..." : `🎲 자동 매칭 시작 (빈 코트 ${emptyCourtNums.length}개)`}
+              </button>
+            )}
+            {adminOn && !meetingEndedToday && Object.values(courtMatches).some((c) => c && !c.done && c.date === todayStr() && !c.friendly) && (
+              <button
+                onClick={rematchAll}
+                disabled={batchStarting}
+                className="w-full mt-2 py-2 text-xs font-semibold border border-stone-200 text-stone-600 rounded-xl disabled:opacity-60"
+              >
+                🔄 전체 새로 매칭 (모든 코트 다시 짜기)
               </button>
             )}
             {batchDoneMsg && (
