@@ -1799,6 +1799,52 @@ function App() {
   const [justShuffled, setJustShuffled] = useState(false);
   const [previewRounds, setPreviewRounds] = useState(5);
   const [previewData, setPreviewData] = useState(null);
+  const [pvEdit, setPvEdit] = useState(null); // { kind: "pv"|"plan", round, ref, side, idx }
+  const [planOpen, setPlanOpen] = useState(false);
+  const [analysisAll, setAnalysisAll] = useState(false);
+  // 미리보기/대진표의 선수 바꾸기: 같은 라운드에 이미 있는 사람을 고르면 서로 자리가 바뀌고, 쉬는 사람을 고르면 원래 사람이 쉬어요
+  function editPreviewPlayer(roundIdx, mi, side, idx, cand) {
+    setPreviewData((prev) => (prev || []).map((r, ri) => {
+      if (ri !== roundIdx) return r;
+      const matches = r.matches.map((mm) => ({ ...mm, teamA: [...mm.teamA], teamB: [...mm.teamB] }));
+      let resting = [...r.resting];
+      const key = side === "A" ? "teamA" : "teamB";
+      const old = matches[mi][key][idx];
+      if (!old || old.id === cand.id) return r;
+      let found = null;
+      matches.forEach((mm, j) => ["teamA", "teamB"].forEach((k) => mm[k].forEach((p, i) => { if (p.id === cand.id) found = { j, k, i }; })));
+      matches[mi][key][idx] = cand;
+      if (found) matches[found.j][found.k][found.i] = old;
+      else { resting = resting.filter((p) => p.id !== cand.id); resting.push(old); }
+      return { ...r, matches, resting };
+    }));
+    setPvEdit(null);
+  }
+  async function editPlanPlayer(qid, side, idx, cand) {
+    if (!adminOn) { tryAdminUnlock(); return; }
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(PLAN_REF);
+        const d = snap.data() || {};
+        const queue = (d.queue || []).map((q) => ({ ...q, teamA: [...q.teamA], teamB: [...q.teamB] }));
+        const e = queue.find((q) => q.id === qid);
+        if (!e) return;
+        const key = side === "A" ? "teamA" : "teamB";
+        const old = e[key][idx];
+        if (!old || old.id === cand.id) return;
+        let found = null;
+        queue.filter((q) => q.round === e.round).forEach((q) => ["teamA", "teamB"].forEach((k) => q[k].forEach((p, i) => { if (p.id === cand.id) found = { q, k, i }; })));
+        const slim = { id: cand.id, name: cand.name };
+        e[key][idx] = slim;
+        if (found) found.q[found.k][found.i] = { id: old.id, name: old.name };
+        tx.set(PLAN_REF, { ...d, queue });
+      });
+    } catch (err) {
+      appAlert("⚠️ 대진표 수정 중 오류: " + (err && err.message ? err.message : String(err)));
+    }
+    setPvEdit(null);
+  }
+
   // 결과 없이 여러 라운드를 한꺼번에 시뮬레이션해요 — 판수 균등(적게 친 사람 먼저), 파트너/상대 중복 최소화, 팀 실력 밸런스를 그대로 써요.
   function buildPreview() {
     const base = players.filter((p) => !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
@@ -4083,7 +4129,7 @@ function App() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-bold text-stone-800">📋 여러 라운드 미리 짜보기</p>
-                <p className="text-[11px] text-stone-400">경기 결과 없이도 지금 참석자로 연속 라운드를 한 번에 짜서 보여줘요.</p>
+                <p className="text-[11px] text-stone-400">경기 결과 없이도 지금 참석자로 연속 라운드를 한 번에 짜서 보여줘요. 이름을 누르면 바꿀 수 있어요.</p>
               </div>
             </div>
             <div className="flex items-center gap-2 mt-3">
@@ -4101,6 +4147,58 @@ function App() {
               <div className="mt-3 rounded-xl p-3 border" style={{ borderColor: "#16A34A", backgroundColor: "#F0FDF4" }}>
                 <p className="text-xs font-bold" style={{ color: "#15803D" }}>📌 대진표로 진행 중 · 남은 {plan.queue.length}경기</p>
                 <p className="text-[11px] text-stone-500 mt-1">{plan.queue.slice(0, 3).map((q) => `${q.round}R ${q.teamA.map((p) => p.name).join("+")} vs ${q.teamB.map((p) => p.name).join("+")}`).join(" / ")}{plan.queue.length > 3 ? " …" : ""}</p>
+                <button onClick={() => setPlanOpen((v) => !v)} className="mt-2 text-xs font-semibold underline underline-offset-2" style={{ color: "#15803D" }}>{planOpen ? "대진표 접기" : adminOn ? "📝 대진표 전체 보기 · 선수 바꾸기" : "📝 대진표 전체 보기"}</button>
+                {planOpen && (() => {
+                  const rounds = [...new Set(plan.queue.map((q) => q.round))].sort((a, b) => a - b);
+                  const pool = players.filter((p) => !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id));
+                  return (
+                    <div className="mt-2 space-y-2">
+                      {rounds.map((rn) => {
+                        const items = plan.queue.filter((q) => q.round === rn);
+                        const inRound = new Set(items.flatMap((q) => [...q.teamA, ...q.teamB].map((p) => p.id)));
+                        return (
+                          <div key={rn} className="rounded-lg border bg-white p-2" style={{ borderColor: "var(--bc-line)" }}>
+                            <p className="text-[11px] font-bold mb-1" style={{ color: "var(--bc-blue)" }}>{rn}라운드</p>
+                            {items.map((q, qi) => (
+                              <div key={q.id} className="flex flex-wrap items-center gap-1 py-0.5 text-xs">
+                                <b className="mr-1">{qi + 1}경기</b>
+                                {["A", "B"].map((side) => (
+                                  <React.Fragment key={side}>
+                                    {(side === "A" ? q.teamA : q.teamB).map((p, pi) => {
+                                      const sel = pvEdit && pvEdit.kind === "plan" && pvEdit.ref === q.id && pvEdit.side === side && pvEdit.idx === pi;
+                                      return adminOn ? (
+                                        <button key={p.id} onClick={() => setPvEdit(sel ? null : { kind: "plan", round: rn, ref: q.id, side, idx: pi })} className="px-2 py-0.5 rounded-full border" style={sel ? { backgroundColor: "var(--bc-navy)", color: "#fff", borderColor: "var(--bc-navy)" } : { borderColor: "var(--bc-line)", backgroundColor: "#fff" }}>{p.name}</button>
+                                      ) : <span key={p.id} className="px-1">{p.name}</span>;
+                                    })}
+                                    {side === "A" && <span className="text-stone-400">vs</span>}
+                                  </React.Fragment>
+                                ))}
+                              </div>
+                            ))}
+                            {adminOn && pvEdit && pvEdit.kind === "plan" && pvEdit.round === rn && (
+                              <div className="mt-2 pt-2 border-t" style={{ borderColor: "var(--bc-line)" }}>
+                                <p className="text-[11px] text-stone-500 mb-1.5">누구로 바꿀까요?</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {pool.map((p) => {
+                                    const qq = items.find((x) => x.id === pvEdit.ref);
+                                    const cur = qq ? (pvEdit.side === "A" ? qq.teamA : qq.teamB)[pvEdit.idx] : null;
+                                    if (cur && cur.id === p.id) return null;
+                                    return (
+                                      <button key={p.id} onClick={() => editPlanPlayer(pvEdit.ref, pvEdit.side, pvEdit.idx, p)} className="px-2.5 py-1 rounded-full text-xs border bg-white" style={{ borderColor: "var(--bc-line)", color: "#475569" }}>
+                                        {p.name}<span className="text-stone-400"> · {inRound.has(p.id) ? "이 라운드 출전" : "쉼"}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <button onClick={() => setPvEdit(null)} className="mt-2 text-xs text-stone-400 underline">취소</button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
                 {adminOn && (
                   <div className="flex gap-2 mt-2">
                     <button onClick={startPlannedAllEmpty} className="flex-1 rounded-lg py-2 text-xs font-bold text-white" style={{ backgroundColor: "#16A34A" }}>빈 코트에 바로 시작</button>
@@ -4122,12 +4220,37 @@ function App() {
                 {previewData.map((r, i) => (
                   <div key={i} className="rounded-xl border p-3" style={{ borderColor: "var(--bc-line)" }}>
                     <p className="text-[11px] font-bold mb-1" style={{ color: "var(--bc-blue)" }}>{i + 1}라운드</p>
-                    {r.matches.map((mm) => (
-                      <p key={mm.court} className="text-xs text-stone-700 leading-relaxed">
-                        <b>{mm.court}코트</b> {mm.teamA.map((p) => p.name).join("·")} <span className="text-stone-400">vs</span> {mm.teamB.map((p) => p.name).join("·")}
-                      </p>
+                    {r.matches.map((mm, mi) => (
+                      <div key={mm.court} className="flex flex-wrap items-center gap-1 py-0.5 text-xs text-stone-700">
+                        <b className="mr-1">{mm.court}코트</b>
+                        {mm.teamA.map((p, pi) => (
+                          <button key={p.id} onClick={() => setPvEdit(pvEdit && pvEdit.kind === "pv" && pvEdit.round === i && pvEdit.ref === mi && pvEdit.side === "A" && pvEdit.idx === pi ? null : { kind: "pv", round: i, ref: mi, side: "A", idx: pi })} className="px-2 py-0.5 rounded-full border" style={pvEdit && pvEdit.kind === "pv" && pvEdit.round === i && pvEdit.ref === mi && pvEdit.side === "A" && pvEdit.idx === pi ? { backgroundColor: "var(--bc-navy)", color: "#fff", borderColor: "var(--bc-navy)" } : { borderColor: "var(--bc-line)", backgroundColor: "#fff" }}>{p.name}</button>
+                        ))}
+                        <span className="text-stone-400">vs</span>
+                        {mm.teamB.map((p, pi) => (
+                          <button key={p.id} onClick={() => setPvEdit(pvEdit && pvEdit.kind === "pv" && pvEdit.round === i && pvEdit.ref === mi && pvEdit.side === "B" && pvEdit.idx === pi ? null : { kind: "pv", round: i, ref: mi, side: "B", idx: pi })} className="px-2 py-0.5 rounded-full border" style={pvEdit && pvEdit.kind === "pv" && pvEdit.round === i && pvEdit.ref === mi && pvEdit.side === "B" && pvEdit.idx === pi ? { backgroundColor: "var(--bc-navy)", color: "#fff", borderColor: "var(--bc-navy)" } : { borderColor: "var(--bc-line)", backgroundColor: "#fff" }}>{p.name}</button>
+                        ))}
+                      </div>
                     ))}
                     {r.resting.length > 0 && <p className="text-[11px] text-stone-400 mt-1">😴 쉬는 사람: {r.resting.map((p) => p.name).join(", ")}</p>}
+                    {pvEdit && pvEdit.kind === "pv" && pvEdit.round === i && (
+                      <div className="mt-2 pt-2 border-t" style={{ borderColor: "var(--bc-line)" }}>
+                        <p className="text-[11px] text-stone-500 mb-1.5">누구로 바꿀까요? (이 라운드에 이미 있는 사람이면 서로 자리가 바뀌고, 쉬는 사람이면 원래 사람이 쉬어요)</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {players.filter((p) => !restWish[p.id] && !leftEarly[p.id] && !excluded.includes(p.id)).map((p) => {
+                            const cur = (r.matches[pvEdit.ref][pvEdit.side === "A" ? "teamA" : "teamB"] || [])[pvEdit.idx];
+                            if (cur && cur.id === p.id) return null;
+                            const at = r.matches.find((mm) => [...mm.teamA, ...mm.teamB].some((x) => x.id === p.id));
+                            return (
+                              <button key={p.id} onClick={() => editPreviewPlayer(i, pvEdit.ref, pvEdit.side, pvEdit.idx, p)} className="px-2.5 py-1 rounded-full text-xs border bg-white" style={{ borderColor: "var(--bc-line)", color: "#475569" }}>
+                                {p.name}<span className="text-stone-400"> · {at ? at.court + "코트" : "쉼"}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <button onClick={() => setPvEdit(null)} className="mt-2 text-xs text-stone-400 underline">취소</button>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {previewData.length > 0 && <p className="text-[10px] text-stone-400">※ "진행하기"를 누르면 이 순서대로 실제 경기가 시작돼요. 안 누르면 미리보기일 뿐이에요.</p>}
@@ -4959,6 +5082,94 @@ function App() {
                 </div>
 
 
+                {/* 🤝 파트너·상대·점수 분석 */}
+                {s.games > 0 && (() => {
+                  const partners = {}, opps = {};
+                  let pf = 0, pa = 0, scored = 0, close = { w: 0, l: 0 };
+                  let bigWin = null, bigLoss = null;
+                  allRecent.forEach((mm) => {
+                    const inA = (mm.teamA || []).some((p) => p.id === viewId);
+                    const mine = inA ? mm.teamA : mm.teamB;
+                    const theirs = inA ? mm.teamB : mm.teamA;
+                    const won = myWon(mm);
+                    (mine || []).forEach((p) => { if (p.id === viewId) return; const o = (partners[p.id] = partners[p.id] || { id: p.id, name: p.name, g: 0, w: 0 }); o.g++; if (won) o.w++; });
+                    (theirs || []).forEach((p) => { const o = (opps[p.id] = opps[p.id] || { id: p.id, name: p.name, g: 0, w: 0 }); o.g++; if (won) o.w++; });
+                    if (matchHasScore(mm)) {
+                      const my = Number(inA ? mm.scoreA : mm.scoreB), op = Number(inA ? mm.scoreB : mm.scoreA);
+                      scored++; pf += my; pa += op;
+                      const diff = my - op;
+                      if (Math.abs(diff) <= 2) { if (diff > 0) close.w++; else close.l++; }
+                      const info = { my, op, date: (mm.date || "").slice(5).replace("-", "/"), who: (mine || []).filter((p) => p.id !== viewId).map((p) => p.name).join("·"), vs: (theirs || []).map((p) => p.name).join("·") };
+                      if (diff > 0 && (!bigWin || diff > bigWin.diff)) bigWin = { ...info, diff };
+                      if (diff < 0 && (!bigLoss || diff < bigLoss.diff)) bigLoss = { ...info, diff };
+                    }
+                  });
+                  const rate = (o) => (o.g ? o.w / o.g : 0);
+                  const sortBest = (arr) => [...arr].sort((a, b) => rate(b) - rate(a) || b.g - a.g);
+                  const pList = Object.values(partners), oList = Object.values(opps);
+                  const pEligible = pList.filter((o) => o.g >= 2), oEligible = oList.filter((o) => o.g >= 2);
+                  const pickBest = (el, all) => { let c = sortBest(el)[0]; if (!c || rate(c) === 0) c = sortBest(all)[0]; return c && rate(c) > 0 ? c : null; };
+                  const pickWorst = (el, all) => { const asc = (arr) => [...arr].sort((x, y) => rate(x) - rate(y) || y.g - x.g)[0]; let c = asc(el); if (!c || rate(c) === 1) c = asc(all); return c && rate(c) < 1 ? c : null; };
+                  const bestP = pickBest(pEligible, pList), worstP = pickWorst(pEligible, pList);
+                  const easyO = pickBest(oEligible, oList), hardO = pickWorst(oEligible, oList);
+                  const fmt = (o) => `${o.w}승 ${o.g - o.w}패 (${Math.round(rate(o) * 100)}%)`;
+                  const Row = ({ icon, label, o, good }) => o ? (
+                    <div className="flex items-center justify-between py-1.5">
+                      <span className="text-xs text-stone-500">{icon} {label}</span>
+                      <span className="text-sm text-right"><b className="text-stone-800">{o.name}</b> <span className="text-[11px] ml-1" style={{ color: good ? "#16A34A" : "#DC2626" }}>{fmt(o)}</span></span>
+                    </div>
+                  ) : null;
+                  const listP = [...pList].sort((a, b) => b.g - a.g || rate(b) - rate(a));
+                  const listO = [...oList].sort((a, b) => b.g - a.g || rate(b) - rate(a));
+                  const shownP = analysisAll ? listP : listP.slice(0, 6);
+                  const shownO = analysisAll ? listO : listO.slice(0, 6);
+                  return (
+                    <div className="bc-card p-4 space-y-4">
+                      <p className="text-sm font-bold text-stone-800">🤝 파트너 · 상대 · 점수 분석</p>
+                      <div>
+                        <p className="text-xs font-bold text-stone-400 mb-1">파트너 궁합 {pEligible.length === 0 && <span className="font-normal">(2경기 이상 함께한 사람이 아직 없어서 1경기 기준)</span>}</p>
+                        <Row icon="💚" label="가장 잘 맞는 파트너" o={bestP} good />
+                        <Row icon="💔" label="가장 안 맞는 파트너" o={bestP && worstP && worstP.id === bestP.id ? null : worstP} />
+                        <div className="mt-2 space-y-1">
+                          {shownP.map((o) => (
+                            <div key={o.id} className="flex items-center justify-between text-xs">
+                              <span className="text-stone-700">{o.name}</span>
+                              <span className="text-stone-400">{o.g}번 같은 팀 · <span style={{ color: rate(o) >= 0.5 ? "#16A34A" : "#DC2626" }}>{fmt(o)}</span></span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="border-t pt-3" style={{ borderColor: "var(--bc-line)" }}>
+                        <p className="text-xs font-bold text-stone-400 mb-1">상대 전적</p>
+                        <Row icon="😎" label="가장 잘 이기는 상대" o={easyO} good />
+                        <Row icon="😰" label="가장 약한 상대 (자주 짐)" o={hardO && easyO && hardO.id === easyO.id ? null : hardO} />
+                        <div className="mt-2 space-y-1">
+                          {shownO.map((o) => (
+                            <div key={o.id} className="flex items-center justify-between text-xs">
+                              <span className="text-stone-700">{o.name}</span>
+                              <span className="text-stone-400">{o.g}번 상대 · <span style={{ color: rate(o) >= 0.5 ? "#16A34A" : "#DC2626" }}>{fmt(o)}</span></span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {(listP.length > 6 || listO.length > 6) && (
+                        <button onClick={() => setAnalysisAll((v) => !v)} className="w-full text-xs font-semibold py-2 rounded-lg border" style={{ borderColor: "var(--bc-line)", color: "var(--bc-sub)" }}>{analysisAll ? "접기" : "전체 보기"}</button>
+                      )}
+                      <div className="border-t pt-3" style={{ borderColor: "var(--bc-line)" }}>
+                        <p className="text-xs font-bold text-stone-400 mb-1">점수 (점수를 입력한 {scored}경기 기준)</p>
+                        {scored === 0 ? <p className="text-xs text-stone-400">점수가 입력된 경기가 아직 없어요.</p> : (
+                          <div className="space-y-1.5 text-sm">
+                            <div className="flex justify-between"><span className="text-xs text-stone-500">평균 득점 : 실점</span><b>{(pf / scored).toFixed(1)} : {(pa / scored).toFixed(1)}</b></div>
+                            <div className="flex justify-between"><span className="text-xs text-stone-500">접전 (2점 차 이내)</span><b>{close.w}승 {close.l}패</b></div>
+                            {bigWin && <div className="flex justify-between gap-2"><span className="text-xs text-stone-500 shrink-0">🔥 가장 크게 이긴 경기</span><span className="text-right text-xs"><b style={{ color: "#16A34A" }}>{bigWin.my} : {bigWin.op}</b> <span className="text-stone-400">{bigWin.date} · {bigWin.who ? bigWin.who + " 와(과) 함께, " : ""}vs {bigWin.vs}</span></span></div>}
+                            {bigLoss && <div className="flex justify-between gap-2"><span className="text-xs text-stone-500 shrink-0">🥶 가장 크게 진 경기</span><span className="text-right text-xs"><b style={{ color: "#DC2626" }}>{bigLoss.my} : {bigLoss.op}</b> <span className="text-stone-400">{bigLoss.date} · {bigLoss.who ? bigLoss.who + " 와(과) 함께, " : ""}vs {bigLoss.vs}</span></span></div>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* ⑥⑦ 전체 경기 기록 + 필터 */}
                 {showFullRecords && (
                   <div className="fixed inset-0 z-[90] bg-black/40 flex items-end justify-center" onClick={() => setShowFullRecords(false)}>
@@ -5295,7 +5506,8 @@ function App() {
                           return (
                             <div
                               key={p.id}
-                              className="bc-card p-3 text-center overflow-hidden"
+                              onClick={() => { window.location.href = `./match.html?tab=record&id=${encodeURIComponent(p.id)}`; }}
+                              className="bc-card p-3 text-center overflow-hidden cursor-pointer"
                               style={{
                                 ...(i === 0 ? { borderColor: "var(--bc-blue)", borderWidth: 2, boxShadow: "0 4px 14px rgba(37,99,235,0.15)" } : {}),
                                 ...(isMe ? { backgroundColor: "var(--bc-blue-soft)" } : {}),
@@ -5328,7 +5540,8 @@ function App() {
                           return (
                             <li
                               key={p.id}
-                              className="bc-card px-4 py-3 flex items-center gap-2"
+                              onClick={() => { window.location.href = `./match.html?tab=record&id=${encodeURIComponent(p.id)}`; }}
+                              className="bc-card px-4 py-3 flex items-center gap-2 cursor-pointer"
                               style={isMe ? { backgroundColor: "var(--bc-blue-soft)", borderColor: "var(--bc-blue-line)" } : {}}
                             >
                               <span className="scorefont text-sm w-6 shrink-0 font-bold text-stone-400">{i + 1}</span>
@@ -5344,7 +5557,7 @@ function App() {
                                 <p className="text-[10px] text-stone-400">{p.stats.games}경기</p>
                               </div>
                               {adminOn && (
-                                <button onClick={() => correctPlayerStats(p)} className="text-[11px] text-stone-400 underline underline-offset-2 shrink-0">
+                                <button onClick={(e) => { e.stopPropagation(); correctPlayerStats(p); }} className="text-[11px] text-stone-400 underline underline-offset-2 shrink-0">
                                   수정
                                 </button>
                               )}
@@ -5389,7 +5602,7 @@ function App() {
                       {unranked
                         .sort((a, b) => b.stats.games - a.stats.games)
                         .map((p) => (
-                          <div key={p.id} className="flex items-center justify-between">
+                          <div key={p.id} onClick={() => { window.location.href = `./match.html?tab=record&id=${encodeURIComponent(p.id)}`; }} className="flex items-center justify-between cursor-pointer">
                             <span className="text-sm text-stone-700">{p.name}{p.id === myId && <span className="text-[10px] font-bold ml-1" style={{ color: "var(--bc-blue)" }}>나</span>}</span>
                             <span className="text-xs text-stone-400">{p.stats.games}/{RANKING_MIN_GAMES}경기</span>
                           </div>
