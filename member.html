@@ -173,8 +173,109 @@ function ResultsTab({ data, q }) {
   );
 }
 
+function analyzeMember(name, recent) {
+  const partners = {}, opps = {};
+  let pf = 0, pa = 0, scored = 0, games = 0, close = { w: 0, l: 0 }, bigWin = null, bigLoss = null;
+  (recent || []).forEach((h) => {
+    const inA = (h.teamA || []).includes(name), inB = (h.teamB || []).includes(name);
+    if (!inA && !inB) return;
+    if (h.winner !== "A" && h.winner !== "B") return;
+    games++;
+    const won = (inA && h.winner === "A") || (inB && h.winner === "B");
+    const mine = inA ? h.teamA : h.teamB, theirs = inA ? h.teamB : h.teamA;
+    mine.forEach((n) => { if (n === name) return; const o = (partners[n] = partners[n] || { name: n, g: 0, w: 0 }); o.g++; if (won) o.w++; });
+    theirs.forEach((n) => { const o = (opps[n] = opps[n] || { name: n, g: 0, w: 0 }); o.g++; if (won) o.w++; });
+    if (h.scoreA !== "" && h.scoreB !== "" && !isNaN(Number(h.scoreA)) && !isNaN(Number(h.scoreB))) {
+      const my = Number(inA ? h.scoreA : h.scoreB), op = Number(inA ? h.scoreB : h.scoreA);
+      scored++; pf += my; pa += op;
+      const diff = my - op;
+      if (Math.abs(diff) <= 2) { if (diff > 0) close.w++; else close.l++; }
+      const info = { my, op, diff, date: (h.date || "").slice(5).replace("-", "/"), who: mine.filter((n) => n !== name).join("·"), vs: theirs.join("·") };
+      if (diff > 0 && (!bigWin || diff > bigWin.diff)) bigWin = info;
+      if (diff < 0 && (!bigLoss || diff < bigLoss.diff)) bigLoss = info;
+    }
+  });
+  const rate = (o) => (o.g ? o.w / o.g : 0);
+  const best = (arr) => [...arr].sort((a, b) => rate(b) - rate(a) || b.g - a.g)[0];
+  const worst = (arr) => [...arr].sort((a, b) => rate(a) - rate(b) || b.g - a.g)[0];
+  const pList = Object.values(partners), oList = Object.values(opps);
+  const pEl = pList.filter((o) => o.g >= 2), oEl = oList.filter((o) => o.g >= 2);
+  const pickBest = (el, all) => { let c = best(el); if (!c || rate(c) === 0) c = best(all); return c && rate(c) > 0 ? c : null; };
+  const pickWorst = (el, all) => { let c = worst(el); if (!c || rate(c) === 1) c = worst(all); return c && rate(c) < 0.5 ? c : null; };
+  const bestP = pickBest(pEl, pList); let worstP = pickWorst(pEl, pList); if (bestP && worstP && bestP.name === worstP.name) worstP = null;
+  const easyO = pickBest(oEl, oList); let hardO = pickWorst(oEl, oList); if (easyO && hardO && easyO.name === hardO.name) hardO = null;
+  const sortList = (l) => [...l].sort((a, b) => b.g - a.g || rate(b) - rate(a));
+  return { games, scored, pf, pa, close, bigWin, bigLoss, bestP, worstP, easyO, hardO, pList: sortList(pList), oList: sortList(oList), rate };
+}
+
+function MemberDetail({ m, data, onClose, onSetBase }) {
+  const a = useMemo(() => analyzeMember(m.name, data.recent), [m.name, data]);
+  const [all, setAll] = useState(false);
+  const fmt = (o) => `${o.w}승 ${o.g - o.w}패 (${Math.round(a.rate(o) * 100)}%)`;
+  const Row = ({ icon, label, o, good }) => o ? (
+    <div className="flex items-center justify-between py-1.5">
+      <span className="text-xs text-stone-500">{icon} {label}</span>
+      <span className="text-sm text-right"><b className="text-stone-800">{o.name}</b> <span className="text-[11px] ml-1" style={{ color: good ? "#16A34A" : "#DC2626" }}>{fmt(o)}</span></span>
+    </div>
+  ) : null;
+  const pShow = all ? a.pList : a.pList.slice(0, 6), oShow = all ? a.oList : a.oList.slice(0, 6);
+  const rt = m.games > 0 ? Math.round((m.wins / m.games) * 100) : 0;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-3xl w-full max-w-2xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 flex items-center justify-between border-b sticky top-0 bg-white" style={{ borderColor: "var(--bc-line)" }}>
+          <p className="text-sm font-bold text-stone-800">{m.name} <TierBadge tier={m.tier} /></p>
+          <button onClick={onClose} className="text-stone-400 text-sm">✕ 닫기</button>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="grid grid-cols-4 gap-2 text-center">
+            {[["순위", m.rank + "위"], ["점수", m.score], ["전적", `${m.wins}승 ${m.losses}패`], ["승률", rt + "%"]].map(([k, v]) => (
+              <div key={k} className="rounded-xl py-2" style={{ backgroundColor: "#F8FAFC" }}><p className="text-[10px] text-stone-400">{k}</p><p className="text-sm font-bold text-stone-800">{v}</p></div>
+            ))}
+          </div>
+          {a.games === 0 ? <p className="text-xs text-stone-400 text-center py-4">분석할 경기 기록이 아직 없어요.</p> : (
+            <>
+              <div>
+                <p className="text-xs font-bold text-stone-400 mb-1">파트너 궁합</p>
+                <Row icon="💚" label="가장 잘 맞는 파트너" o={a.bestP} good />
+                <Row icon="💔" label="가장 안 맞는 파트너" o={a.worstP} />
+                <div className="mt-2 space-y-1">{pShow.map((o) => (
+                  <div key={o.name} className="flex items-center justify-between text-xs"><span className="text-stone-700">{o.name}</span><span className="text-stone-400">{o.g}번 같은 팀 · <span style={{ color: a.rate(o) >= 0.5 ? "#16A34A" : "#DC2626" }}>{fmt(o)}</span></span></div>
+                ))}</div>
+              </div>
+              <div className="border-t pt-3" style={{ borderColor: "var(--bc-line)" }}>
+                <p className="text-xs font-bold text-stone-400 mb-1">상대 전적</p>
+                <Row icon="😎" label="가장 잘 이기는 상대" o={a.easyO} good />
+                <Row icon="😰" label="가장 약한 상대 (자주 짐)" o={a.hardO} />
+                <div className="mt-2 space-y-1">{oShow.map((o) => (
+                  <div key={o.name} className="flex items-center justify-between text-xs"><span className="text-stone-700">{o.name}</span><span className="text-stone-400">{o.g}번 상대 · <span style={{ color: a.rate(o) >= 0.5 ? "#16A34A" : "#DC2626" }}>{fmt(o)}</span></span></div>
+                ))}</div>
+              </div>
+              {(a.pList.length > 6 || a.oList.length > 6) && <button onClick={() => setAll(!all)} className="w-full text-xs font-semibold py-2 rounded-lg border" style={{ borderColor: "var(--bc-line)", color: "#64748B" }}>{all ? "접기" : "전체 보기"}</button>}
+              <div className="border-t pt-3" style={{ borderColor: "var(--bc-line)" }}>
+                <p className="text-xs font-bold text-stone-400 mb-1">점수 (점수를 입력한 {a.scored}경기 기준)</p>
+                {a.scored === 0 ? <p className="text-xs text-stone-400">점수가 입력된 경기가 아직 없어요.</p> : (
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between"><span className="text-xs text-stone-500">평균 득점 : 실점</span><b>{(a.pf / a.scored).toFixed(1)} : {(a.pa / a.scored).toFixed(1)}</b></div>
+                    <div className="flex justify-between"><span className="text-xs text-stone-500">접전 (2점 차 이내)</span><b>{a.close.w}승 {a.close.l}패</b></div>
+                    {a.bigWin && <div className="flex justify-between gap-2"><span className="text-xs text-stone-500 shrink-0">🔥 가장 크게 이긴 경기</span><span className="text-right text-xs"><b style={{ color: "#16A34A" }}>{a.bigWin.my} : {a.bigWin.op}</b> <span className="text-stone-400">{a.bigWin.date} · {a.bigWin.who ? a.bigWin.who + " 와(과) 함께, " : ""}vs {a.bigWin.vs}</span></span></div>}
+                    {a.bigLoss && <div className="flex justify-between gap-2"><span className="text-xs text-stone-500 shrink-0">🥶 가장 크게 진 경기</span><span className="text-right text-xs"><b style={{ color: "#DC2626" }}>{a.bigLoss.my} : {a.bigLoss.op}</b> <span className="text-stone-400">{a.bigLoss.date} · {a.bigLoss.who ? a.bigLoss.who + " 와(과) 함께, " : ""}vs {a.bigLoss.vs}</span></span></div>}
+                  </div>
+                )}
+              </div>
+              <p className="text-[10px] text-stone-400">※ 최근 경기 기록(최대 150경기) 기준이에요.</p>
+            </>
+          )}
+          <button onClick={() => { onSetBase(m.name); onClose(); }} className="w-full text-xs font-semibold py-2.5 rounded-lg border" style={{ borderColor: "var(--bc-line)", color: "#64748B" }}>이 사람 기준으로 점수 차이 비교하기</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RankingTab({ data, q }) {
   const [base, setBase] = useState(null);
+  const [detail, setDetail] = useState(null);
   const ranked = useMemo(() => {
     const arr = [...(data.members || [])].sort((a, b) => b.score - a.score || b.wins - a.wins || a.name.localeCompare(b.name, "ko"));
     return arr.map((m, i) => ({ ...m, rank: i + 1 }));
@@ -203,13 +304,13 @@ function RankingTab({ data, q }) {
           </div>
         </div>
       )}
-      <p className="text-[11px] text-stone-400">이름을 누르면 그 사람 기준으로 점수 차이를 비교해요. {base && <button className="underline ml-1" onClick={() => setBase(null)}>비교 해제</button>}</p>
+      <p className="text-[11px] text-stone-400">이름을 누르면 그 사람의 전적·파트너·상대 분석을 볼 수 있어요. {base && <button className="underline ml-1" onClick={() => setBase(null)}>비교 해제</button>}</p>
       <div className="bc-card overflow-hidden">
         {visible.map((m) => {
           const isBase = base === m.name;
           const diff = baseM && !isBase ? m.score - baseM.score : null;
           return (
-            <button key={m.name} onClick={() => setBase(isBase ? null : m.name)} className="w-full text-left px-3 py-2.5 flex items-center gap-3 border-b last:border-b-0" style={{ borderColor: "var(--bc-line)", background: isBase ? "#FEF9C3" : "transparent" }}>
+            <button key={m.name} onClick={() => setDetail(m.name)} className="w-full text-left px-3 py-2.5 flex items-center gap-3 border-b last:border-b-0" style={{ borderColor: "var(--bc-line)", background: isBase ? "#FEF9C3" : "transparent" }}>
               <span className="w-7 text-center text-sm font-bold" style={{ color: m.rank <= 3 ? "#B45309" : "#94A3B8" }}>{m.rank}</span>
               <span className="flex-1 min-w-0">
                 <span className="text-sm font-semibold text-stone-800 truncate">{m.name}</span> <TierBadge tier={m.tier} />
@@ -225,6 +326,7 @@ function RankingTab({ data, q }) {
         {visible.length === 0 && <p className="text-xs text-stone-400 text-center py-6">일치하는 이름이 없어요</p>}
       </div>
       <p className="text-[10px] text-stone-400">점수는 경기 승패에 따라 오르내려요. 처음 3경기 전에는 "평가중"이에요.</p>
+      {detail && ranked.find((x) => x.name === detail) && <MemberDetail m={ranked.find((x) => x.name === detail)} data={data} onClose={() => setDetail(null)} onSetBase={setBase} />}
     </div>
   );
 }

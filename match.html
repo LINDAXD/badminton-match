@@ -5109,7 +5109,7 @@ function App() {
                   const pList = Object.values(partners), oList = Object.values(opps);
                   const pEligible = pList.filter((o) => o.g >= 2), oEligible = oList.filter((o) => o.g >= 2);
                   const pickBest = (el, all) => { let c = sortBest(el)[0]; if (!c || rate(c) === 0) c = sortBest(all)[0]; return c && rate(c) > 0 ? c : null; };
-                  const pickWorst = (el, all) => { const asc = (arr) => [...arr].sort((x, y) => rate(x) - rate(y) || y.g - x.g)[0]; let c = asc(el); if (!c || rate(c) === 1) c = asc(all); return c && rate(c) < 1 ? c : null; };
+                  const pickWorst = (el, all) => { const asc = (arr) => [...arr].sort((x, y) => rate(x) - rate(y) || y.g - x.g)[0]; let c = asc(el); if (!c || rate(c) === 1) c = asc(all); return c && rate(c) < 0.5 ? c : null; };
                   const bestP = pickBest(pEligible, pList), worstP = pickWorst(pEligible, pList);
                   const easyO = pickBest(oEligible, oList), hardO = pickWorst(oEligible, oList);
                   const fmt = (o) => `${o.w}승 ${o.g - o.w}패 (${Math.round(rate(o) * 100)}%)`;
