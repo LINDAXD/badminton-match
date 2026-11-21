@@ -482,6 +482,7 @@ window.WEEKDAYS = WEEKDAYS;
 // ---------- 회원 프로필 카드 (클릭하면 열리는 모달) ----------
 function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems, kindvotes, matchhistory, dailyvotes, noshows, lates, canEdit, isAdmin, isSelf, onSave, onClose, onGiveNoShow, onGiveLate }) {
   const [edit, setEdit] = useState(false);
+  const [nameDraft, setNameDraft] = useState(member.name || "");
   const [bio, setBio] = useState(member.bio || "");
   const [career, setCareer] = useState(member.career || "");
   const [activeDay, setActiveDay] = useState(member.activeDay || "");
@@ -509,7 +510,8 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
   }
 
   function save() {
-    onSave({ bio, career, activeDay, social, birthday });
+    const nm = (nameDraft || "").trim();
+    onSave({ bio, career, activeDay, social, birthday, ...((isAdmin || isSelf) && nm && nm !== member.name ? { name: nm } : {}) });
     setEdit(false);
   }
 
@@ -561,6 +563,10 @@ function MemberProfileModal({ member, checkinlog, allSessionDates, scheduleItems
 
           {edit ? (
             <div className="space-y-2 mb-4">
+              {(isAdmin || isSelf) && <div>
+                <p className="text-[11px] text-stone-400 mb-1">이름</p>
+                <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} placeholder="이름" maxLength={12} className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+              </div>}
               <textarea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="한 줄 소개" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
               <input value={career} onChange={(e) => setCareer(e.target.value)} placeholder="배드민턴 경력 (예: 2년차)" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
               <input

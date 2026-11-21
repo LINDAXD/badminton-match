@@ -838,16 +838,17 @@ function App() {
   // 전체 새로 매칭: 점수 입력 전인 지금 경기와 다음 경기 예약을 모두 지우고, 모든 코트를 처음부터 다시 짜요
   async function rematchAll() {
     if (!adminOn) { tryAdminUnlock(); return; }
-    const active = Object.entries(courtMatches).filter(([cn, m]) => m && !m.done && m.date === todayStr() && !m.friendly && !isNaN(Number(cn)));
+    const active = Object.entries(courtMatches).filter(([cn, m]) => m && !m.done && m.date === todayStr() && !m.friendly && !isNaN(Number(cn)) && !lockedCourts.includes(Number(cn)));
     const unscored = active.filter(([, m]) => isUnscoredMatch(m));
     const scored = active.length - unscored.length;
-    if (!(await appConfirm(`지금 점수 입력 전인 경기 ${unscored.length}개와 다음 경기 예약을 모두 지우고, 참석자 전체로 새로 매칭할까요?${scored > 0 ? `\n(점수가 이미 들어간 ${scored}경기는 그대로 둬요)` : ""}`))) return;
+    if (!(await appConfirm(`지금 점수 입력 전인 경기 ${unscored.length}개와 다음 경기 예약을 모두 지우고, 참석자 전체로 새로 매칭할까요?${lockedCourts.length ? `\n(🔒 잠근 ${lockedCourts.join('·')}번 코트는 그대로 둬요)` : ""}${scored > 0 ? `\n(점수가 이미 들어간 ${scored}경기는 그대로 둬요)` : ""}`))) return;
     try {
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(REFS.courtmatches);
         const current = (snap.data() || {}).data || {};
         const cleaned = {};
         Object.entries(current).forEach(([cn, c]) => {
+          if (lockedCourts.includes(Number(cn))) { cleaned[cn] = c; return; } // 🔒 잠근 코트는 건드리지 않아요
           if (c && !c.done && c.date === todayStr() && !c.friendly && !isNaN(Number(cn))) {
             if (isUnscoredMatch(c)) return;
             if (c.next) { const { next: _n, ...rest } = c; cleaned[cn] = rest; return; }
@@ -1928,10 +1929,24 @@ function App() {
   reservedNextIds.forEach((id) => { if (playingNowIds.has(id)) reservedNextIds.delete(id); });
   // 선수 교체 목록 — "지금 코트에서 뛰고 있지 않은 모든 참석자"를 보여줘요 (다음 경기로 예약된 사람, 쉬기 표시한 사람도 포함).
   // 예전엔 대기 후보(waitingPlayers)만 보여줘서, 자동 예약에 들어간 사람이 목록에서 사라졌어요.
+  // 교체 추천 순위: 대기 목록(오래 쉰 사람 먼저) 순서 그대로가 "1순위". 이미 다른 경기에 예약된 사람/쉬는 사람은 그 뒤.
+  const _todayG = todayGames();
+  const gamesTodayOf = {};
+  _todayG.forEach((g) => [...g.teamA, ...g.teamB].forEach((id) => { gamesTodayOf[id] = (gamesTodayOf[id] || 0) + 1; }));
+  const waitRankOf = {};
+  waitingPlayers.forEach((p, i) => { waitRankOf[p.id] = i + 1; });
+  const prioText = (id) => {
+    const r = waitRankOf[id];
+    const g = gamesTodayOf[id] || 0;
+    const ago = id in _ago ? _ago[id] : null;
+    const rest = ago === null ? "아직 안 침" : ago === 0 ? "방금 침" : `${ago}경기 쉼`;
+    const cls = streakCls(_ri, id);
+    return `${r ? (r <= 4 ? "⭐" + r + "순위" : r + "순위") : "-"} · 오늘 ${g}게임 · ${rest}${cls >= 1 && r ? " ⚠연속" : ""}`;
+  };
   const swapCandidates = players
     .filter((p) => !playingNowIds.has(p.id) && !leftEarly[p.id])
-    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
-  const swapLabel = (p) => p.name + (reservedNextIds.has(p.id) ? " (다음 경기 예약)" : restWish[p.id] ? " (쉬는 중)" : excluded.includes(p.id) ? " (매칭 제외)" : "");
+    .sort((a, b) => (waitRankOf[a.id] || 9999) - (waitRankOf[b.id] || 9999) || a.name.localeCompare(b.name, "ko"));
+  const swapLabel = (p) => p.name + " · " + prioText(p.id) + (reservedNextIds.has(p.id) ? " (다음 경기 예약)" : restWish[p.id] ? " (쉬는 중)" : excluded.includes(p.id) ? " (매칭 제외)" : "");
   const displayWaitingCount = players.filter(
     (p) => !playingNowIds.has(p.id) && !leftEarly[p.id] && !excluded.includes(p.id)
   ).length;
@@ -1946,7 +1961,7 @@ function App() {
   // 🔮 다음 경기 예상 — 아직 "다음 경기 예약"이 없는 코트도, 지금 경기가 끝난다고 치고 미리 보여줘요 (예상이라 바뀔 수 있어요)
   const predictSig = JSON.stringify([
     Object.entries(courtMatches).filter(([, c]) => c && !c.done && c.date === todayStr() && !c.friendly).map(([cn, c]) => [cn, c.teamA.map((p) => p.id), c.teamB.map((p) => p.id), c.next ? [c.next.teamA.map((p) => p.id), c.next.teamB.map((p) => p.id)] : 0]),
-    players.map((p) => p.id), Object.keys(restWish), Object.keys(leftEarly), excluded, numCourts, history.length, shuffleNonce,
+    players.map((p) => p.id), Object.keys(restWish), Object.keys(leftEarly), excluded, numCourts, history.length, shuffleNonce, lockedCourts,
   ]);
   const predictedNext = React.useMemo(() => {
     try {
@@ -1957,7 +1972,7 @@ function App() {
         [...c.teamA, ...c.teamB].forEach((p) => nowIds.add(p.id));
         if (c.next) [...c.next.teamA, ...c.next.teamB].forEach((p) => reserved.add(p.id));
       });
-      const need = live.filter(([, c]) => !c.next).map(([cn]) => cn).sort((a, b) => Number(a) - Number(b));
+      const need = live.filter(([cn, c]) => !c.next && !lockedCourts.includes(Number(cn))).map(([cn]) => cn).sort((a, b) => Number(a) - Number(b));
       if (!need.length) return {};
       const ri0 = roundInfo();
       const sim = players
@@ -2041,12 +2056,17 @@ function App() {
     const timed = [...fin, ...act].filter((g) => g.startedAt).sort((x, y) => x.startedAt - y.startedAt);
     const legacyAct = act.filter((g) => !g.startedAt);
     const all = [...legacy, ...timed, ...legacyAct];
+    // 라운드를 앞에서부터 "코트 수만큼 + 같은 사람이 겹치면 새 라운드"로 순서대로 묶어요.
+    // (예전엔 경기 순번 ÷ 현재 코트 수로 나눠서, 코트 수를 2→4 / 4→2로 바꾸면 방금 친 사람이 쉰 사람처럼 보였어요)
     const rounds = {};
-    all.forEach((g, i) => {
-      const r = Math.floor(i / nc);
-      [...g.teamA, ...g.teamB].forEach((id) => { (rounds[id] = rounds[id] || new Set()).add(r); });
+    let r = 0, cnt = 0, inRound = new Set();
+    all.forEach((g) => {
+      const ids = [...g.teamA, ...g.teamB];
+      if (cnt > 0 && (cnt >= nc || ids.some((id) => inRound.has(id)))) { r++; cnt = 0; inRound = new Set(); }
+      ids.forEach((id) => { inRound.add(id); (rounds[id] = rounds[id] || new Set()).add(r); });
+      cnt++;
     });
-    return { rounds, curRound: Math.floor(all.length / nc) };
+    return { rounds, curRound: all.length === 0 ? 0 : (cnt >= nc ? r + 1 : r) };
   }
   // 0 = 직전 라운드에 쉬었음 / 1 = 직전 라운드에 뛰었음(또 뛰면 2연속) / 2 = 직전 2라운드 연속으로 뛰었음(또 뛰면 3연속 → 사실상 금지)
   function streakCls(ri, id) {
@@ -2110,11 +2130,22 @@ function App() {
     //  - 그 안에서: 오늘 같은 팀이었던 사람 반복은 아주 큰 감점, 두 팀 실력 차이가 벌어지면 감점 (splitScore)
     const { list, info, tier } = waitRank(pool);
     if (list.length <= 4) return list.slice(0, 4);
-    const cand = list.slice(0, Math.min(list.length, 12));
+    // ⚠️ 안 쉰(연속) 사람 vs 쉰 사람: 쉰 사람(cls 0)이 4명 이상이면 그 안에서만 뽑아요. 모자라면 쉰 사람은 전부 넣고 나머지 자리만 방금 친 사람 중 가장 오래 쉰 순으로 채워요.
+    // (점수 차/파트너 반복 감점이 커서 방금 친 사람이 끼어드는 일을 막는 하드 규칙 — 모드/코트 수와 상관없이 항상 적용)
+    let must = [];
+    let cand;
+    for (let c = 0; c <= 2; c++) {
+      const g = list.filter((p) => info[p.id].cls === c);
+      if (must.length + g.length <= 4) { must = must.concat(g); continue; }
+      cand = g.slice(0, 12);
+      break;
+    }
+    if (!cand) return must.slice(0, 4);
     const STEP = 10;
     const CLS = [0, 4500, 100000];
     let best = null;
-    combosOf(cand, 4).forEach((four) => {
+    combosOf(cand, 4 - must.length).forEach((rest) => {
+      const four = must.concat(rest);
       const r = splitScore(four, matchCtx);
       const waitCost = four.reduce((sum, p) => sum + tier[p.id] * STEP + CLS[info[p.id].cls], 0);
       let spreadCost = 0;
@@ -2439,14 +2470,14 @@ function App() {
     if (nextBusy) return;
     setNextBusy(true);
     try {
-      const hasReserved = Object.values(courtMatches).some((c) => c && !c.done && c.date === todayStr() && !c.friendly && c.next);
+      const hasReserved = Object.entries(courtMatches).some(([cn, c]) => c && !c.done && c.date === todayStr() && !c.friendly && c.next && !lockedCourts.includes(Number(cn)));
       if (hasReserved) {
         await db.runTransaction(async (tx) => {
           const snap = await tx.get(REFS.courtmatches);
           const cur = (snap.data() || {}).data || {};
           const out = {};
           Object.entries(cur).forEach(([cn, c]) => {
-            if (c && !c.done && c.date === todayStr() && !c.friendly && c.next) { const { next: _n, ...rest } = c; out[cn] = rest; } else out[cn] = c;
+            if (c && !c.done && c.date === todayStr() && !c.friendly && c.next && !lockedCourts.includes(Number(cn))) { const { next: _n, ...rest } = c; out[cn] = rest; } else out[cn] = c;
           });
           tx.set(REFS.courtmatches, { data: out });
         });
@@ -4667,7 +4698,7 @@ function App() {
                 const nc = nextCourtOf[p.id];
                 if (nc && old && nowCourtOf[old.id] && nowCourtOf[old.id] !== nc) return false;
                 return true;
-              });
+              }).sort((a, b) => (waitRankOf[a.id] || 9999) - (waitRankOf[b.id] || 9999) || a.name.localeCompare(b.name, "ko"));
             };
             const anyPred = nums.some((cn) => !courtMatches[cn].next && predictedNext[cn]);
             const NameBtn = ({ cn, side, idx, p }) => {
@@ -4715,11 +4746,11 @@ function App() {
                             </div>
                             {nextEdit && nextEdit.court === cn && (
                               <div className="mt-3 pt-3 border-t" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
-                                <p className="text-[11px] text-stone-500 mb-1.5">누구로 바꿀까요? (이미 다른 다음 경기에 있으면 서로 자리가 바뀌어요)</p>
+                                <p className="text-[11px] text-stone-500 mb-1.5">누구로 바꿀까요? 추천 순서대로예요 (⭐ = 대기 1~4순위, 오래 쉰 사람 먼저). 이미 다른 다음 경기에 있으면 서로 자리가 바뀌어요.</p>
                                 <div className="flex flex-wrap gap-1.5">
                                   {candidatesFor(nextEdit).map((p) => (
                                     <button key={p.id} disabled={nextBusy} onClick={() => editNextGame(nextEdit, p.id)} className="px-2.5 py-1 rounded-full text-xs border bg-white disabled:opacity-50" style={{ borderColor: "var(--bc-line)", color: "#475569" }}>
-                                      {p.name}<span className="text-stone-400"> · {where[p.id] || "대기"}</span>
+                                      {p.name}<span className="text-stone-400"> · {where[p.id] || "대기"} · {prioText(p.id)}</span>
                                     </button>
                                   ))}
                                 </div>

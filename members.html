@@ -122,7 +122,40 @@ function App() {
     return () => unsub();
   }, []);
 
+  async function renameEverywhere(id, newName) {
+    // 지난 기록/진행 중 경기에 들어있는 이름도 같이 바꿔요 (id 기준)
+    const fix = (t) => (t || []).map((p) => (p && p.id === id ? { ...p, name: newName } : p));
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.matchhistory);
+        const d = snap.data() || {};
+        if (!d.items) return;
+        tx.set(REFS.matchhistory, { ...d, items: d.items.map((g) => ({ ...g, teamA: fix(g.teamA), teamB: fix(g.teamB) })) });
+      });
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.courtmatches);
+        const d = snap.data() || {};
+        const cur = d.data || {};
+        const out = {};
+        Object.entries(cur).forEach(([cn, m]) => {
+          if (!m || !m.teamA) { out[cn] = m; return; }
+          const mm = { ...m, teamA: fix(m.teamA), teamB: fix(m.teamB) };
+          if (m.next) mm.next = { ...m.next, teamA: fix(m.next.teamA), teamB: fix(m.next.teamB) };
+          out[cn] = mm;
+        });
+        tx.set(REFS.courtmatches, { ...d, data: out });
+      });
+    } catch (e) {}
+  }
   function saveProfileFields(fields) {
+    if (fields.name !== undefined) {
+      const nm = String(fields.name).trim();
+      if (!nm) { delete fields.name; }
+      else if (roster.some((r) => r.id !== profileMember.id && r.name === nm)) {
+        appAlert("이미 같은 이름의 회원이 있어요. 다른 이름으로 바꿔주세요.");
+        delete fields.name;
+      } else { fields.name = nm; renameEverywhere(profileMember.id, nm); }
+    }
     const next = roster.map((m) => (m.id === profileMember.id ? { ...m, ...fields } : m));
     persist(next);
     setProfileMember((prev) => (prev ? { ...prev, ...fields } : prev));
