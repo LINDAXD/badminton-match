@@ -1945,8 +1945,11 @@ function App() {
   const prioText = (id) => {
     const r = waitRankOf[id];
     const g = gamesTodayOf[id] || 0;
-    const ago = id in _ago ? _ago[id] : null;
-    const rest = ago === null ? "아직 안 침" : ago === 0 ? "방금 침" : `${ago}경기 쉼`;
+    const rs = _ri.rounds[id];
+    const lastR = rs && rs.size ? Math.max(...rs) : null;
+    // 라운드(코트 수만큼 한 번에 치는 묶음) 기준: 직전 라운드에 쳤으면 "방금 침", 그 전이면 "N라운드 쉼"
+    const restR = lastR === null ? null : Math.max(0, _ri.curRound - 1 - lastR);
+    const rest = lastR === null ? "아직 안 침" : restR === 0 ? "방금 침" : `${restR}라운드 쉼`;
     const cls = streakCls(_ri, id);
     return `${r ? (r <= 4 ? "⭐" + r + "순위" : r + "순위") : "-"} · 오늘 ${g}게임 · ${rest}${cls >= 1 && r ? " ⚠연속" : ""}`;
   };
@@ -2148,10 +2151,17 @@ function App() {
       break;
     }
     if (!cand) return must.slice(0, 4);
-    const STEP = 10;
+    // ⏱ 가장 오래 기다린 사람 2명은 무조건 넣어요 (균형/반복 방지 때문에 오래 쉰 사람이 계속 밀리는 걸 막는 하드 규칙).
+    // 나머지 자리도 오래 기다린 순서에 비중을 크게 줘요 (STEP) — 균형/반복 감점이 있어도 오래 쉰 사람이 우선이에요.
+    const slots = 4 - must.length;
+    const leadN = Math.max(0, Math.min(2, slots - 1));
+    const lead = cand.slice(0, leadN);
+    const cand2 = cand.slice(leadN);
+    must = must.concat(lead);
+    const STEP = 400;
     const CLS = [0, 4500, 100000];
     let best = null;
-    combosOf(cand, 4 - must.length).forEach((rest) => {
+    combosOf(cand2, 4 - must.length).forEach((rest) => {
       const four = must.concat(rest);
       const r = splitScore(four, matchCtx);
       const waitCost = four.reduce((sum, p) => sum + tier[p.id] * STEP + CLS[info[p.id].cls], 0);
