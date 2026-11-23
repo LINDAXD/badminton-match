@@ -973,6 +973,7 @@ function logMatchResult(record) {
     const snap = await tx.get(REFS.matchhistory);
     const data = snap.data() || {};
     const items = data.items || [];
+    if (record.matchId && items.some((it) => it.matchId === record.matchId)) return; // 같은 경기가 이미 기록돼 있으면 또 넣지 않아요
     tx.set(REFS.matchhistory, { items: [{ id: uid(), date: todayStr(), ...record }, ...items] });
   }).catch(() => {});
 }

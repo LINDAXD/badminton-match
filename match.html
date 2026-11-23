@@ -591,6 +591,9 @@ function App() {
   }, []);
   const [hist, setHist] = useState(buildHistory());
   const [courtMatches, setCourtMatches] = useState({}); // { [courtNumber]: match | null }
+  const courtMatchesRef = useRef({}); // 항상 "지금 최신" 코트 상태 (타이머/중복 클릭에서 옛날 값으로 또 종료되는 걸 막아요)
+  courtMatchesRef.current = courtMatches;
+  const finishedMatchIdsRef = useRef(new Set()); // 이미 종료 처리한 경기 id — 같은 경기가 두 번 기록되는 걸 막아요
   const [matchSeq, setMatchSeq] = useState(0);
   const localFinishedRef = useRef([]); // 이 화면에서 방금 끝낸 경기들의 선수 id 목록 (최근 것이 앞) — 대기 순서 계산용
   const [history, setHistory] = useState([]);
@@ -1246,6 +1249,39 @@ function App() {
     }
   }
 
+  // 같은 경기가 두 번 들어간 기록 찾기/정리 (같은 날·코트·시작시각·선수·점수)
+  function dupKey(h) {
+    const ids = (t) => (t || []).map((p) => p.id).sort().join(",");
+    return [h.date, h.court, h.matchId || h.startedAt || h.time || "", ids(h.teamA), ids(h.teamB), h.scoreA, h.scoreB].join("|");
+  }
+  async function cleanDuplicateRecords() {
+    if (!adminOn) return;
+    const items = matchhistory || [];
+    const seen = {}; const extras = [];
+    // 점수/승패가 반영된 기록(skillDeltas 있는 것)을 우선 남겨요
+    [...items].sort((a, b) => (b.skillDeltas ? 1 : 0) - (a.skillDeltas ? 1 : 0)).forEach((h) => { const k = dupKey(h); if (seen[k]) extras.push(h); else seen[k] = h; });
+    if (extras.length === 0) return;
+    if (!(await appConfirm(`같은 경기가 두 번 기록된 ${extras.length}건을 지울까요?\n(중복으로 올라갔던 실력점수 변동도 같이 되돌려요)`))) return;
+    try {
+      const ids = new Set(extras.map((h) => h.id));
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(REFS.matchhistory);
+        tx.set(REFS.matchhistory, { items: ((snap.data() || {}).items || []).filter((it) => !ids.has(it.id)) });
+      });
+      const withD = extras.filter((h) => h.skillDeltas);
+      if (withD.length) {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(REFS.roster);
+          const list = (snap.data() || {}).members || [];
+          tx.set(REFS.roster, { members: list.map((mm) => {
+            let sc = seedScore(mm); let ch = false;
+            withD.forEach((h) => { const d = h.skillDeltas[mm.id]; if (d) { sc -= (d.after - d.before); ch = true; } });
+            return ch ? { ...mm, skillScore: sc } : mm;
+          }) });
+        });
+      }
+    } catch (e) { appAlert("정리에 실패했어요. 다시 시도해주세요."); }
+  }
   async function deleteMatchRecord(m) {
     if (!adminOn) return;
     if (!(await appConfirm(`${m.date} · Court ${m.court} 경기 기록을 삭제할까요? 되돌릴 수 없어요.`))) return;
@@ -2762,6 +2798,8 @@ function App() {
   const [showFullRecords, setShowFullRecords] = useState(false); // 기록 탭 - 전체 경기 기록 보기
   const [recordFilter, setRecordFilter] = useState("all"); // 전체 경기 기록 필터: all | win | loss
   const [resultsSearch, setResultsSearch] = useState(""); // 경기결과 탭 이름 검색
+  const [resultsDate, setResultsDate] = useState(""); // 경기결과 탭 날짜 ("" = 오늘)
+  const shiftDateStr = (ds, delta) => { const d = new Date(ds + "T00:00:00"); d.setDate(d.getDate() + delta); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
   const [rankSearch, setRankSearch] = useState(""); // 랭킹 탭 - 내 순위 찾기 검색
   const [batchDoneMsg, setBatchDoneMsg] = useState("");
   async function startAllEmptyCourts(targetsOverride) {
@@ -3214,13 +3252,15 @@ function App() {
   }
 
   function finishMatch(courtNum, skipScore) {
-    const m = courtMatches[courtNum];
+    const m = courtMatchesRef.current[courtNum];
     if (!m || m.done) return;
+    if (finishedMatchIdsRef.current.has(m.id)) return; // 이미 종료 처리한 경기면 두 번 기록하지 않아요
+    finishedMatchIdsRef.current.add(m.id);
     if (finishingCourt === courtNum) return; // 이미 처리 중이면 중복 실행 방지
     setFinishingCourt(courtNum);
     const hasScores = m.scoreA !== "" && m.scoreB !== "" && m.scoreA !== m.scoreB;
     const hasWinnerPick = m.winnerOverride === "A" || m.winnerOverride === "B";
-    if (!skipScore && !hasScores && !hasWinnerPick) { setFinishingCourt(null); return; }
+    if (!skipScore && !hasScores && !hasWinnerPick) { finishedMatchIdsRef.current.delete(m.id); setFinishingCourt(null); return; }
     // ⏭️ 스킵: 점수/승패 없이 일단 끝내고 다음 경기로 넘어가요. 나중에 경기결과 탭에서 점수를 넣으면 그때 전적·실력점수에 반영돼요.
     const skipped = !!skipScore && !hasScores && !hasWinnerPick;
     const aWin = skipped ? null : hasScores ? Number(m.scoreA) > Number(m.scoreB) : m.winnerOverride === "A";
@@ -3251,6 +3291,7 @@ function App() {
 
     (skipped ? Promise.resolve(null) : applySkillRatingUpdate(m, aWin)).then((deltas) => {
       logMatchResult({
+        matchId: m.id,
         round: matchSeq,
         startedAt: m.startedAt || null, // 경기 시작 시각 — "연속으로 뛰는지" 계산에 써요
         court: m.court,
@@ -3328,15 +3369,15 @@ function App() {
       setPendingAutoFinish((p) => (p[courtNum] ? p : { ...p, [courtNum]: true }));
       autoFinishTimersRef.current[courtNum] = setTimeout(() => {
         setPendingAutoFinish((p) => ({ ...p, [courtNum]: false }));
-        const latest = courtMatches[courtNum];
-        if (!latest || latest.done) return;
+        const latest = courtMatchesRef.current[courtNum]; // (옛날 값이 아니라 지금 최신 값으로 확인)
+        if (!latest || latest.done || latest.id !== m.id) return;
         const latestKey = `${latest.scoreA}|${latest.scoreB}`;
         if (autoFinishCanceledKeyRef.current[courtNum] === latestKey) return;
         const la = Number(latest.scoreA), lb = Number(latest.scoreB);
         const stillDecided =
           latest.scoreA !== "" && latest.scoreB !== "" && !isNaN(la) && !isNaN(lb) && la !== lb &&
           ((Math.max(la, lb) >= 21 && Math.abs(la - lb) >= 2) || Math.max(la, lb) >= 30);
-        if (stillDecided && finishingCourt !== Number(courtNum)) finishMatch(Number(courtNum));
+        if (stillDecided) finishMatch(Number(courtNum));
       }, Math.max(1, autoFinishDelaySec) * 1000);
     });
   }, [courtMatches, autoFinishDelaySec]);
@@ -5322,8 +5363,22 @@ function App() {
       {tab === "results" && (
         <section className="px-5 mt-5 space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-bold text-stone-400">📝 {resultsSearch ? "검색 결과" : "오늘의 경기 결과"}</p>
+            <p className="text-xs font-bold text-stone-400">📝 {resultsSearch ? "검색 결과 (전체 날짜)" : (resultsDate && resultsDate !== todayStr() ? resultsDate + " 경기 결과" : "오늘의 경기 결과")}</p>
           </div>
+          {!resultsSearch && (
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setResultsDate(shiftDateStr(resultsDate || todayStr(), -1))} className="px-3 py-2 rounded-lg border border-stone-300 text-sm bg-white">‹ 이전</button>
+              <input type="date" value={resultsDate || todayStr()} max={todayStr()} onChange={(e) => setResultsDate(e.target.value || "")} className="flex-1 min-w-0 rounded-lg border border-stone-300 px-2 py-2 text-sm bg-white" />
+              <button onClick={() => { const n = shiftDateStr(resultsDate || todayStr(), 1); setResultsDate(n >= todayStr() ? "" : n); }} disabled={!resultsDate || resultsDate >= todayStr()} className="px-3 py-2 rounded-lg border border-stone-300 text-sm bg-white disabled:opacity-30">다음 ›</button>
+              <button onClick={() => setResultsDate(shiftDateStr(todayStr(), -1))} className="px-2.5 py-2 rounded-lg border border-stone-300 text-xs bg-white">어제</button>
+              <button onClick={() => setResultsDate("")} className="px-2.5 py-2 rounded-lg border border-stone-300 text-xs bg-white">오늘</button>
+            </div>
+          )}
+          {adminOn && (() => {
+            const seen = {}; let dup = 0;
+            (matchhistory || []).forEach((h) => { const k = dupKey(h); if (seen[k]) dup++; else seen[k] = 1; });
+            return dup > 0 ? <button onClick={cleanDuplicateRecords} className="w-full rounded-xl border border-amber-300 bg-amber-50 text-amber-800 text-sm font-semibold py-2.5">🧹 같은 경기가 두 번 기록된 {dup}건 정리하기</button> : null;
+          })()}
           <input
             value={resultsSearch}
             onChange={(e) => setResultsSearch(e.target.value)}
@@ -5355,13 +5410,13 @@ function App() {
             const q = resultsSearch.trim().normalize("NFC");
             const list = q
               ? matchhistory.filter((m) => [...(m.teamA || []), ...(m.teamB || [])].some((p) => (p.name || "").normalize("NFC").includes(q)))
-              : matchhistory.filter((m) => m.date === todayStr());
+              : matchhistory.filter((m) => m.date === (resultsDate || todayStr()));
             if (list.length === 0) {
               return (
                 <div className="bc-card px-4 py-8 text-center">
                   <p className="text-3xl mb-2">🏸</p>
-                  <p className="text-sm font-semibold text-stone-600">{q ? "일치하는 경기가 없어요" : "아직 끝난 경기가 없어요"}</p>
-                  {!q && <p className="text-xs text-stone-400 mt-1">경기가 끝나면 여기에 결과가 쌓여요.</p>}
+                  <p className="text-sm font-semibold text-stone-600">{q ? "일치하는 경기가 없어요" : (resultsDate && resultsDate !== todayStr() ? "이 날은 기록된 경기가 없어요" : "아직 끝난 경기가 없어요")}</p>
+                  {!q && !resultsDate && <p className="text-xs text-stone-400 mt-1">경기가 끝나면 여기에 결과가 쌓여요.</p>}
                 </div>
               );
             }
