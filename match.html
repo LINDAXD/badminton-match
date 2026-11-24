@@ -2227,7 +2227,7 @@ function App() {
       if (matchMode === "skill") {
         // 실력전: 네 명의 실력 차(가장 센 사람 - 가장 약한 사람)가 클수록 크게 감점 → 비슷한 수준끼리 한 코트에 모여요
         const sk = four.map((p) => skillOf(p.id));
-        spreadCost = (Math.max(...sk) - Math.min(...sk)) * 800;
+        spreadCost = (Math.max(...sk) - Math.min(...sk)) * 10000;
       }
       const cost = r.s + waitCost + spreadCost + Math.random() * 0.01;
       if (!best || cost < best.cost) best = { cost, four };
@@ -2861,7 +2861,7 @@ function App() {
           // 실력 순서에 조금씩 흔들림을 줘서 여러 번 시도하고, "실력 차가 작고 + 왕초보끼리 한 팀이 안 되는" 배치를 골라요
           const costOf = (fours) => fours.reduce((sum, four) => {
             const sk = four.map((p) => skillOf(p.id));
-            return sum + splitScore(four, matchCtx).s + (Math.max(...sk) - Math.min(...sk)) * 800;
+            return sum + splitScore(four, matchCtx).s + (Math.max(...sk) - Math.min(...sk)) * 10000;
           }, 0);
           bestTotal = costOf(groups);
           for (let t = 0; t < 400; t++) {
